@@ -186,6 +186,9 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
 
 
 try:
+    import matplotlib
+    matplotlib.use('agg')
+
     import matplotlib.pyplot as plt
     # matplotlib color maps
     cdict = {'red':   ((0.0,  1.0, 1.0),
