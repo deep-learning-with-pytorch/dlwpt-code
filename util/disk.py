@@ -78,7 +78,7 @@ class GzipDisk(Disk):
         return value
 
 def getCache(scope_str):
-    return FanoutCache('data/cache/' + scope_str, disk=GzipDisk, shards=32, timeout=1, size_limit=8e10)
+    return FanoutCache('data/cache/' + scope_str, disk=GzipDisk, shards=32, timeout=1, size_limit=2e11)
 
 # def disk_cache(base_path, memsize=2):
 #     def disk_cache_decorator(f):

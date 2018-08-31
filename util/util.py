@@ -147,6 +147,7 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
     if iter_len is None:
         iter_len = len(iter)
 
+    assert backoff >= 2
     while print_ndx < start_ndx * backoff:
         print_ndx *= backoff
 
@@ -154,14 +155,14 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
         desc_str,
         iter_len,
     ))
+    start_ts = time.time()
     for (current_ndx, item) in enumerate(iter):
-        if current_ndx == start_ndx:
-            start_ts = time.time()
-        elif current_ndx == print_ndx:
-            # ... <1>
-            duration_sec = ((time.time() - start_ts) *
-                            (iter_len-start_ndx) /
-                            (current_ndx-start_ndx))
+        yield (current_ndx, item)
+        if current_ndx == print_ndx:
+            duration_sec = ((time.time() - start_ts)
+                            / (current_ndx - start_ndx + 1)
+                            * (iter_len-start_ndx)
+                            )
 
             done_dt = datetime.datetime.fromtimestamp(start_ts + duration_sec)
             done_td = datetime.timedelta(seconds=duration_sec)
@@ -176,7 +177,8 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
 
             print_ndx *= backoff
 
-        yield (current_ndx, item)
+        if current_ndx + 1 == start_ndx:
+            start_ts = time.time()
 
     log.warning("{} ----/{}, done at {}".format(
         desc_str,
@@ -187,7 +189,7 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
 
 try:
     import matplotlib
-    matplotlib.use('agg')
+    matplotlib.use('agg', warn=False)
 
     import matplotlib.pyplot as plt
     # matplotlib color maps
