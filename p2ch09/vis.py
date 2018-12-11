@@ -4,7 +4,7 @@ matplotlib.use('nbagg')
 import numpy as np
 import matplotlib.pyplot as plt
 
-from p2ch11.dsets import Ct, LunaDataset
+from p2ch11_old.dsets import Ct, LunaDataset
 
 clim=(0.0, 1.3)
 

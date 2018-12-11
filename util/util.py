@@ -144,6 +144,65 @@ def prhist(ary, prefix_str=None, **kwargs):
 
 
 def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, iter_len=None):
+    """
+
+    :param iter: `iter` is the iterable that will be passed into `enumerate`. Required.
+
+    :param desc_str: This is a human-readable string that describes what the loop is doing.
+The value is arbitrary, but should be kept reasonably short.
+Things like `"epoch 4 training"` or `"deleting temp files"` or similar
+would all make sense.
+
+    :param start_ndx:
+    :param print_ndx:
+    :param backoff:
+    :param iter_len: Since we need to know the number of items to estimate when the loop will finish,
+that can be provided by passing in a value for `iter_len`.
+If a value isn't provided, then it will be set by using the value of `len(iter)`.
+
+    :return:
+
+
+==== Required argument: `iter` and optionally `iter_len`
+
+These two are pretty simple.
+
+==== Required argument: `desc_str`
+
+
+
+==== Optional argument: `start_ndx`
+
+This parameter defines how many iterations of the loop should be skipped
+before timing actually starts.
+Skipping a few iterations can be useful if there are startup costs
+like caching that are only paid early on,
+resulting in a skewed average
+when those early iterations dominate the average time per iteration.
+
+NOTE: Using `start_ndx` to skip some iterations makes the time spent
+performing those iterations not be included
+in the displayed duration.
+Please account for this if you use the displayed duration for anything formal.
+
+This parameter defaults to `0`.
+
+==== Optional arguments: `print_ndx` and `backoff`
+
+`print_ndx` determines which loop interation that the timing logging will start on,
+and `backoff` is used to how many iterations to skip before logging again.
+The intent is that we don't start logging until we've given the loop
+a few iterations to let the average time-per-iteration a chance to stablize a bit.
+We require that `print_ndx` not be less than `start_ndx` times `backoff`,
+since `start_ndx` greater than `0` implies that the early N iterations
+are unstable from a timing perspective.
+Frequent logging is less interesting later on,
+so by default we double the gap between logging messages each time after the first.
+
+
+`print_ndx` defaults to `4` and `backoff` defaults to `2`.
+
+    """
     if iter_len is None:
         iter_len = len(iter)
 
@@ -159,6 +218,7 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
     for (current_ndx, item) in enumerate(iter):
         yield (current_ndx, item)
         if current_ndx == print_ndx:
+            # ... <1>
             duration_sec = ((time.time() - start_ts)
                             / (current_ndx - start_ndx + 1)
                             * (iter_len-start_ndx)
@@ -167,7 +227,7 @@ def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, i
             done_dt = datetime.datetime.fromtimestamp(start_ts + duration_sec)
             done_td = datetime.timedelta(seconds=duration_sec)
 
-            log.warning("{} {:-4}/{}, done at {}, {}".format(
+            log.info("{} {:-4}/{}, done at {}, {}".format(
                 desc_str,
                 current_ndx,
                 iter_len,

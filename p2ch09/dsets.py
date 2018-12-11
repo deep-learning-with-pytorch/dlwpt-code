@@ -21,18 +21,18 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
-raw_cache = getCache('part2ch09_raw')
+raw_cache = getCache('part2ch10_raw')
 
 @functools.lru_cache(1)
 def getNoduleInfoList(requireDataOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
-    mhd_list = glob.glob('data/luna/subset*/*.mhd')
+    mhd_list = glob.glob('data-unversioned/part2/luna/subset*/*.mhd')
     dataPresentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
     diameter_dict = {}
-    with open('data/luna/annotations.csv', "r") as f:
+    with open('data/part2/luna/annotations.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
             annotationCenter_xyz = tuple([float(x) for x in row[1:4]])
@@ -41,7 +41,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
             diameter_dict.setdefault(series_uid, []).append((annotationCenter_xyz, annotationDiameter_mm))
 
     noduleInfo_list = []
-    with open('data/luna/candidates.csv', "r") as f:
+    with open('data/part2/luna/candidates.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
 
@@ -68,7 +68,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
 
 class Ct(object):
     def __init__(self, series_uid):
-        mhd_path = glob.glob('data/luna/subset*/{}.mhd'.format(series_uid))[0]
+        mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
         ct_ary = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
@@ -137,13 +137,15 @@ class LunaDataset(Dataset):
                  isTestSet_bool=None,
                  series_uid=None,
                  sortby_str='random',
+                 ratio_int=0,
             ):
+        self.ratio_int = ratio_int
+
         self.noduleInfo_list = copy.copy(getNoduleInfoList())
 
         if series_uid:
             self.noduleInfo_list = [x for x in self.noduleInfo_list if x[2] == series_uid]
 
-        # __init__ continued...
         if test_stride > 1:
             if isTestSet_bool:
                 self.noduleInfo_list = self.noduleInfo_list[::test_stride]
@@ -159,23 +161,42 @@ class LunaDataset(Dataset):
         else:
             raise Exception("Unknown sort: " + repr(sortby_str))
 
-        log.info("{!r}: {} {} samples".format(
+        self.benignIndex_list = [i for i, x in enumerate(self.noduleInfo_list) if not x[0]]
+        self.malignantIndex_list = [i for i, x in enumerate(self.noduleInfo_list) if x[0]]
+
+        log.info("{!r}: {} {} samples, {} ben, {} mal, {} ratio".format(
             self,
             len(self.noduleInfo_list),
             "testing" if isTestSet_bool else "training",
+            len(self.benignIndex_list),
+            len(self.malignantIndex_list),
+            '{}:1'.format(self.ratio_int) if self.ratio_int else 'unbalanced'
         ))
 
+    def shuffleSamples(self):
+        if self.ratio_int:
+            random.shuffle(self.benignIndex_list)
+            random.shuffle(self.malignantIndex_list)
 
     def __len__(self):
-        # if self.ratio_int:
-        #     return min(len(self.benignIndex_list), len(self.malignantIndex_list)) * 4 * 90
-        # else:
-        return len(self.noduleInfo_list)
+        if self.ratio_int:
+            return 100000
+        else:
+            return len(self.noduleInfo_list)
 
     def __getitem__(self, ndx):
-        sample_ndx = ndx
+        if self.ratio_int:
+            malignant_ndx = ndx // (self.ratio_int + 1)
 
-        isMalignant_bool, _diameter_mm, series_uid, center_xyz = self.noduleInfo_list[sample_ndx]
+            if ndx % (self.ratio_int + 1):
+                benign_ndx = ndx - 1 - malignant_ndx
+                nodule_ndx = self.benignIndex_list[benign_ndx % len(self.benignIndex_list)]
+            else:
+                nodule_ndx = self.malignantIndex_list[malignant_ndx % len(self.malignantIndex_list)]
+        else:
+            nodule_ndx = ndx
+
+        isMalignant_bool, _diameter_mm, series_uid, center_xyz = self.noduleInfo_list[nodule_ndx]
 
         nodule_ary, center_irc = getCtRawNodule(series_uid, center_xyz, (32, 32, 32))
 

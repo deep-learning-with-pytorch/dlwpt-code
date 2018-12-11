@@ -21,18 +21,18 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
-raw_cache = getCache('part2ch08_raw')
+raw_cache = getCache('part2ch09_raw')
 
 @functools.lru_cache(1)
 def getNoduleInfoList(requireDataOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
-    mhd_list = glob.glob('data/luna/subset*/*.mhd')
+    mhd_list = glob.glob('data-unversioned/part2/luna/subset*/*.mhd')
     dataPresentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
     diameter_dict = {}
-    with open('data/luna/annotations.csv', "r") as f:
+    with open('data/part2/luna/annotations.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
             annotationCenter_xyz = tuple([float(x) for x in row[1:4]])
@@ -41,7 +41,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
             diameter_dict.setdefault(series_uid, []).append((annotationCenter_xyz, annotationDiameter_mm))
 
     noduleInfo_list = []
-    with open('data/luna/candidates.csv', "r") as f:
+    with open('data/part2/luna/candidates.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
 
@@ -68,7 +68,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
 
 class Ct(object):
     def __init__(self, series_uid):
-        mhd_path = glob.glob('data/luna/subset*/{}.mhd'.format(series_uid))[0]
+        mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
         ct_ary = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
@@ -136,6 +136,7 @@ class LunaDataset(Dataset):
                  test_stride=0,
                  isTestSet_bool=None,
                  series_uid=None,
+                 sortby_str='random',
             ):
         self.noduleInfo_list = copy.copy(getNoduleInfoList())
 
@@ -149,19 +150,32 @@ class LunaDataset(Dataset):
             else:
                 del self.noduleInfo_list[::test_stride]
 
+        if sortby_str == 'random':
+            random.shuffle(self.noduleInfo_list)
+        elif sortby_str == 'series_uid':
+            self.noduleInfo_list.sort(key=lambda x: (x[2], x[3])) # sorting by series_uid, center_xyz)
+        elif sortby_str == 'malignancy_size':
+            pass
+        else:
+            raise Exception("Unknown sort: " + repr(sortby_str))
+
         log.info("{!r}: {} {} samples".format(
             self,
             len(self.noduleInfo_list),
             "testing" if isTestSet_bool else "training",
         ))
 
+
     def __len__(self):
+        # if self.ratio_int:
+        #     return min(len(self.benignIndex_list), len(self.malignantIndex_list)) * 4 * 90
+        # else:
         return len(self.noduleInfo_list)
 
     def __getitem__(self, ndx):
         sample_ndx = ndx
 
-        isMalignant_bool, diameter_mm, series_uid, center_xyz = self.noduleInfo_list[sample_ndx]
+        isMalignant_bool, _diameter_mm, series_uid, center_xyz = self.noduleInfo_list[sample_ndx]
 
         nodule_ary, center_irc = getCtRawNodule(series_uid, center_xyz, (32, 32, 32))
 

@@ -9,9 +9,9 @@ from torch.optim import SGD
 from torch.utils.data import DataLoader
 
 from util.util import enumerateWithEstimate
-from .dsets import LunaDataset
+from .dsets import LunaPrepcacheDataset
 from util.logconf import logging
-from .model import LunaModel
+# from .model import LunaModel
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -28,13 +28,18 @@ class LunaPrepCacheApp(object):
         parser = argparse.ArgumentParser()
         parser.add_argument('--batch-size',
             help='Batch size to use for training',
-            default=1024,
+            default=1,
             type=int,
         )
         parser.add_argument('--num-workers',
             help='Number of worker processes for background data loading',
             default=8,
             type=int,
+        )
+        parser.add_argument('--scaled',
+            help="Scale the CT chunks to square voxels.",
+            default=False,
+            action='store_true',
         )
 
         self.cli_args = parser.parse_args(sys_argv)
@@ -43,8 +48,7 @@ class LunaPrepCacheApp(object):
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
         self.prep_dl = DataLoader(
-            LunaDataset(
-                sortby_str='series_uid',
+            LunaPrepcacheDataset(
             ),
             batch_size=self.cli_args.batch_size,
             num_workers=self.cli_args.num_workers,
@@ -55,8 +59,9 @@ class LunaPrepCacheApp(object):
             "Stuffing cache",
             start_ndx=self.prep_dl.num_workers,
         )
-        for _ in batch_iter:
+        for batch_ndx, batch_tup in batch_iter:
             pass
+            # input_tensor, label_tensor, _series_list, _start_list = batch_tup
 
 
 if __name__ == '__main__':
