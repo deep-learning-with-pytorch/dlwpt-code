@@ -32,7 +32,15 @@ def xyz2irc(coord_xyz, origin_xyz, vxSize_xyz, direction_tup):
 def irc2xyz(coord_irc, origin_xyz, vxSize_xyz, direction_tup):
     # Note: _cri means Col,Row,Index
     coord_cri = np.array(list(reversed(coord_irc)))
-    coord_xyz = coord_cri * np.array(vxSize_xyz) + np.array(origin_xyz)
+    if direction_tup == (1, 0, 0, 0, 1, 0, 0, 0, 1):
+        direction_ary = np.ones((3,))
+    elif direction_tup == (-1, 0, 0, 0, -1, 0, 0, 0, 1):
+        direction_ary = np.array((-1, -1, 1))
+    else:
+        raise Exception("Unsupported direction_tup: {}".format(direction_tup))
+
+
+    coord_xyz = coord_cri * direction_ary * np.array(vxSize_xyz) + np.array(origin_xyz)
     return XyzTuple(*coord_xyz.tolist())
 
 

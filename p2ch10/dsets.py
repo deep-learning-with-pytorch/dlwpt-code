@@ -229,7 +229,7 @@ class Ct(object):
 
             slice_list.append(slice(start_ndx, end_ndx))
 
-        ct_chunk = self.ary[slice_list]
+        ct_chunk = self.ary[tuple(slice_list)]
 
         return ct_chunk, center_irc
 
@@ -301,9 +301,14 @@ def getCtCubicChunk(series_uid, center_xyz, maxWidth_mm):
 
     return ct_chunk, center_irc
 
-def getCtAugmentedNodule(augmentation_dict, series_uid, center_xyz, width_mm, voxels_int, maxWidth_mm=32.0):
+def getCtAugmentedNodule(augmentation_dict, series_uid, center_xyz, width_mm, voxels_int, maxWidth_mm=32.0, use_cache=True):
     assert width_mm <= maxWidth_mm
-    cubic_chunk, center_irc = getCtCubicChunk(series_uid, center_xyz, maxWidth_mm)
+
+    if use_cache:
+        cubic_chunk, center_irc = getCtCubicChunk(series_uid, center_xyz, maxWidth_mm)
+    else:
+        ct = getCt(series_uid)
+        ct_chunk, center_irc = ct.getCubicInputChunk(center_xyz, maxWidth_mm)
 
     slice_list = []
     for axis in range(3):
@@ -391,7 +396,7 @@ class LunaPrepcacheDataset(Dataset):
         return 0
 
 
-class LunaNoduleDataset(Dataset):
+class LunaClassificationDataset(Dataset):
     def __init__(self,
                  test_stride=0,
                  isTestSet_bool=None,
@@ -401,6 +406,7 @@ class LunaNoduleDataset(Dataset):
                  scaled_bool=False,
                  multiscaled_bool=False,
                  augmented_bool=False,
+                 noduleInfo_list=None,
             ):
         self.ratio_int = ratio_int
         self.scaled_bool = scaled_bool
@@ -420,7 +426,12 @@ class LunaNoduleDataset(Dataset):
         else:
             self.augmentation_dict = {}
 
-        self.noduleInfo_list = copy.copy(getNoduleInfoList())
+        if noduleInfo_list:
+            self.noduleInfo_list = copy.copy(noduleInfo_list)
+            self.use_cache = False
+        else:
+            self.noduleInfo_list = copy.copy(getNoduleInfoList())
+            self.use_cache = True
 
         if series_uid:
             self.noduleInfo_list = [x for x in self.noduleInfo_list if x[2] == series_uid]
@@ -459,6 +470,7 @@ class LunaNoduleDataset(Dataset):
 
     def __len__(self):
         if self.ratio_int:
+            # return 10000
             return 100000
         elif self.augmentation_dict:
             return len(self.noduleInfo_list) * 5
@@ -567,7 +579,7 @@ class Luna2dSegmentationDataset(Dataset):
 
             ct_tensor[i] = torch.from_numpy(ct.ary[context_ndx].astype(np.float32))
 
-        air_mask, lung_mask = ct.build2dLungMask(sample_ndx)[2:]
+        air_mask, lung_mask = ct.build2dLungMask(sample_ndx)[:2]
 
         ct_tensor[-1] = torch.from_numpy(lung_mask.astype(np.float32))
 
@@ -576,6 +588,7 @@ class Luna2dSegmentationDataset(Dataset):
 
         masks_tensor[0] = torch.from_numpy(mal_mask.astype(np.float32))
         masks_tensor[1] = torch.from_numpy((mal_mask | ben_mask).astype(np.float32))
+        # masks_tensor[1] = torch.from_numpy(ben_mask.astype(np.float32))
 
         return ct_tensor.contiguous(), masks_tensor.contiguous(), ct.series_uid, sample_ndx
 
@@ -593,21 +606,27 @@ class TrainingLuna2dSegmentationDataset(Luna2dSegmentationDataset):
         assert self.series_list
 
     def __len__(self):
+        # return 100
+        # return 1000
         # return 10000
         return 20000
         # return 40000
 
-    def __getitem__(self, key):
+    def __getitem__(self, ndx):
         if self.needsShuffle_bool:
             random.shuffle(self.series_list)
             self.needsShuffle_bool = False
 
-        if random.random() < 0.1:
-            self.series_list.append(self.series_list.pop(0)) ring buffer
+        if random.random() < 0.01:
+            self.series_list.append(self.series_list.pop(0))
 
-        series_uid = self.series_list[ndx % ctCache_depth]
-        ct = getCt(series_uid)
-        sample_ndx = random.choice(ct.malignant_indexes or ct.benign_indexes)
+        if isinstance(ndx, int):
+            series_uid = self.series_list[ndx % ctCache_depth]
+            ct = getCt(series_uid)
+            sample_ndx = random.choice(ct.malignant_indexes or ct.benign_indexes)
+            # series_uid, sample_ndx = self.sample_list[ndx % len(self.sample_list)]
+        else:
+            series_uid, sample_ndx = ndx
 
         # if ndx % 2 == 0:
         #     sample_ndx = random.choice(ct.malignant_indexes or ct.benign_indexes)

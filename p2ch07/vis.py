@@ -74,3 +74,5 @@ def showNodule(series_uid, batch_ndx=None):
 
 
     print(series_uid, batch_ndx, bool(malignant_tensor[0]), malignant_list)
+
+

@@ -98,12 +98,14 @@ class UNetConvBlock(nn.Module):
         block.append(nn.Conv2d(in_size, out_size, kernel_size=3,
                                padding=int(padding)))
         block.append(nn.ReLU())
+        # block.append(nn.LeakyReLU())
         if batch_norm:
             block.append(nn.BatchNorm2d(out_size))
 
         block.append(nn.Conv2d(out_size, out_size, kernel_size=3,
                                padding=int(padding)))
         block.append(nn.ReLU())
+        # block.append(nn.LeakyReLU())
         if batch_norm:
             block.append(nn.BatchNorm2d(out_size))
 
