@@ -3,7 +3,6 @@ import torch
 from torch import nn as nn
 
 from util.logconf import logging
-from util.unet import UNet
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -51,18 +50,3 @@ class LunaModel(nn.Module):
 
         classifier_output = self.final(classifier_output)
         return classifier_output
-
-class UNetWrapper(nn.Module):
-    def __init__(self, **kwargs):
-        super().__init__()
-
-        self.batchnorm = nn.BatchNorm2d(kwargs['in_channels'])
-        self.unet = UNet(**kwargs)
-        self.hardtanh = nn.Hardtanh(min_val=0, max_val=1)
-
-    def forward(self, input):
-        bn_output = self.batchnorm(input)
-        un_output = self.unet(bn_output)
-        ht_output = self.hardtanh(un_output)
-
-        return ht_output

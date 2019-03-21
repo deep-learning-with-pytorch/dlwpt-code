@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
-raw_cache = getCache('part2ch10_raw')
+raw_cache = getCache('part2ch08_raw')
 
 @functools.lru_cache(1)
 def getNoduleInfoList(requireDataOnDisk_bool=True):
@@ -136,67 +136,32 @@ class LunaDataset(Dataset):
                  test_stride=0,
                  isTestSet_bool=None,
                  series_uid=None,
-                 sortby_str='random',
-                 ratio_int=0,
             ):
-        self.ratio_int = ratio_int
-
         self.noduleInfo_list = copy.copy(getNoduleInfoList())
 
         if series_uid:
             self.noduleInfo_list = [x for x in self.noduleInfo_list if x[2] == series_uid]
 
+        # __init__ continued...
         if test_stride > 1:
             if isTestSet_bool:
                 self.noduleInfo_list = self.noduleInfo_list[::test_stride]
             else:
                 del self.noduleInfo_list[::test_stride]
 
-        if sortby_str == 'random':
-            random.shuffle(self.noduleInfo_list)
-        elif sortby_str == 'series_uid':
-            self.noduleInfo_list.sort(key=lambda x: (x[2], x[3])) # sorting by series_uid, center_xyz)
-        elif sortby_str == 'malignancy_size':
-            pass
-        else:
-            raise Exception("Unknown sort: " + repr(sortby_str))
-
-        self.benignIndex_list = [i for i, x in enumerate(self.noduleInfo_list) if not x[0]]
-        self.malignantIndex_list = [i for i, x in enumerate(self.noduleInfo_list) if x[0]]
-
-        log.info("{!r}: {} {} samples, {} ben, {} mal, {} ratio".format(
+        log.info("{!r}: {} {} samples".format(
             self,
             len(self.noduleInfo_list),
             "testing" if isTestSet_bool else "training",
-            len(self.benignIndex_list),
-            len(self.malignantIndex_list),
-            '{}:1'.format(self.ratio_int) if self.ratio_int else 'unbalanced'
         ))
 
-    def shuffleSamples(self):
-        if self.ratio_int:
-            random.shuffle(self.benignIndex_list)
-            random.shuffle(self.malignantIndex_list)
-
     def __len__(self):
-        if self.ratio_int:
-            return 100000
-        else:
-            return len(self.noduleInfo_list)
+        return len(self.noduleInfo_list)
 
     def __getitem__(self, ndx):
-        if self.ratio_int:
-            malignant_ndx = ndx // (self.ratio_int + 1)
+        sample_ndx = ndx
 
-            if ndx % (self.ratio_int + 1):
-                benign_ndx = ndx - 1 - malignant_ndx
-                nodule_ndx = self.benignIndex_list[benign_ndx % len(self.benignIndex_list)]
-            else:
-                nodule_ndx = self.malignantIndex_list[malignant_ndx % len(self.malignantIndex_list)]
-        else:
-            nodule_ndx = ndx
-
-        isMalignant_bool, _diameter_mm, series_uid, center_xyz = self.noduleInfo_list[nodule_ndx]
+        isMalignant_bool, diameter_mm, series_uid, center_xyz = self.noduleInfo_list[sample_ndx]
 
         nodule_ary, center_irc = getCtRawNodule(series_uid, center_xyz, (32, 32, 32))
 

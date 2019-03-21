@@ -254,51 +254,51 @@ so by default we double the gap between logging messages each time after the fir
         str(datetime.datetime.now()).rsplit('.', 1)[0],
     ))
 
-
-try:
-    import matplotlib
-    matplotlib.use('agg', warn=False)
-
-    import matplotlib.pyplot as plt
-    # matplotlib color maps
-    cdict = {'red':   ((0.0,  1.0, 1.0),
-                       # (0.5,  1.0, 1.0),
-                       (1.0,  1.0, 1.0)),
-
-             'green': ((0.0,  0.0, 0.0),
-                       (0.5,  0.0, 0.0),
-                       (1.0,  0.5, 0.5)),
-
-             'blue':  ((0.0,  0.0, 0.0),
-                       # (0.5,  0.5, 0.5),
-                       # (0.75, 0.0, 0.0),
-                       (1.0,  0.0, 0.0)),
-
-             'alpha':  ((0.0, 0.0, 0.0),
-                       (0.75, 0.5, 0.5),
-                       (1.0,  0.5, 0.5))}
-
-    plt.register_cmap(name='mask', data=cdict)
-
-    cdict = {'red':   ((0.0,  0.0, 0.0),
-                       (0.25,  1.0, 1.0),
-                       (1.0,  1.0, 1.0)),
-
-             'green': ((0.0,  1.0, 1.0),
-                       (0.25,  1.0, 1.0),
-                       (0.5, 0.0, 0.0),
-                       (1.0,  0.0, 0.0)),
-
-             'blue':  ((0.0,  0.0, 0.0),
-                       # (0.5,  0.5, 0.5),
-                       # (0.75, 0.0, 0.0),
-                       (1.0,  0.0, 0.0)),
-
-             'alpha':  ((0.0, 0.15, 0.15),
-                       (0.5,  0.3, 0.3),
-                       (0.8,  0.0, 0.0),
-                       (1.0,  0.0, 0.0))}
-
-    plt.register_cmap(name='maskinvert', data=cdict)
-except ImportError:
-    pass
+#
+# try:
+#     import matplotlib
+#     matplotlib.use('agg', warn=False)
+#
+#     import matplotlib.pyplot as plt
+#     # matplotlib color maps
+#     cdict = {'red':   ((0.0,  1.0, 1.0),
+#                        # (0.5,  1.0, 1.0),
+#                        (1.0,  1.0, 1.0)),
+#
+#              'green': ((0.0,  0.0, 0.0),
+#                        (0.5,  0.0, 0.0),
+#                        (1.0,  0.5, 0.5)),
+#
+#              'blue':  ((0.0,  0.0, 0.0),
+#                        # (0.5,  0.5, 0.5),
+#                        # (0.75, 0.0, 0.0),
+#                        (1.0,  0.0, 0.0)),
+#
+#              'alpha':  ((0.0, 0.0, 0.0),
+#                        (0.75, 0.5, 0.5),
+#                        (1.0,  0.5, 0.5))}
+#
+#     plt.register_cmap(name='mask', data=cdict)
+#
+#     cdict = {'red':   ((0.0,  0.0, 0.0),
+#                        (0.25,  1.0, 1.0),
+#                        (1.0,  1.0, 1.0)),
+#
+#              'green': ((0.0,  1.0, 1.0),
+#                        (0.25,  1.0, 1.0),
+#                        (0.5, 0.0, 0.0),
+#                        (1.0,  0.0, 0.0)),
+#
+#              'blue':  ((0.0,  0.0, 0.0),
+#                        # (0.5,  0.5, 0.5),
+#                        # (0.75, 0.0, 0.0),
+#                        (1.0,  0.0, 0.0)),
+#
+#              'alpha':  ((0.0, 0.15, 0.15),
+#                        (0.5,  0.3, 0.3),
+#                        (0.8,  0.0, 0.0),
+#                        (1.0,  0.0, 0.0))}
+#
+#     plt.register_cmap(name='maskinvert', data=cdict)
+# except ImportError:
+#     pass

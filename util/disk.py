@@ -83,7 +83,7 @@ def getCache(scope_str):
                        shards=128,
                        timeout=1,
                        size_limit=2e11,
-                       disk_min_file_size=2**20,
+                       # disk_min_file_size=2**20,
                        )
 
 # def disk_cache(base_path, memsize=2):
