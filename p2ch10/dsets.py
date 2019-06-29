@@ -5,6 +5,8 @@ import glob
 import os
 import random
 
+from collections import namedtuple
+
 import SimpleITK as sitk
 
 import numpy as np
@@ -18,10 +20,12 @@ from util.logconf import logging
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
-log.setLevel(logging.INFO)
+# log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 raw_cache = getCache('part2ch09_raw')
+
+NoduleInfoTuple = namedtuple('NoduleInfoTuple', 'isMalignant_bool, diameter_mm, series_uid, center_xyz')
 
 @functools.lru_cache(1)
 def getNoduleInfoList(requireDataOnDisk_bool=True):
@@ -61,7 +65,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
                     candidateDiameter_mm = annotationDiameter_mm
                     break
 
-            noduleInfo_list.append((isMalignant_bool, candidateDiameter_mm, series_uid, candidateCenter_xyz))
+            noduleInfo_list.append(NoduleInfoTuple(isMalignant_bool, candidateDiameter_mm, series_uid, candidateCenter_xyz))
 
     noduleInfo_list.sort(reverse=True)
     return noduleInfo_list
@@ -75,15 +79,11 @@ class Ct(object):
 
         # CTs are natively expressed in https://en.wikipedia.org/wiki/Hounsfield_scale
         # HU are scaled oddly, with 0 g/cc (air, approximately) being -1000 and 1 g/cc (water) being 0.
-        # This converts HU to g/cc.
-        ct_ary += 1000
-        ct_ary /= 1000
-
         # This gets rid of negative density stuff used to indicate out-of-FOV
-        ct_ary[ct_ary < 0] = 0
+        ct_ary[ct_ary < -1000] = -1000
 
         # This nukes any weird hotspots and clamps bone down
-        ct_ary[ct_ary > 2] = 2
+        ct_ary[ct_ary > 1000] = 1000
 
         self.series_uid = series_uid
         self.ary = ct_ary
@@ -116,7 +116,7 @@ class Ct(object):
 
             slice_list.append(slice(start_ndx, end_ndx))
 
-        ct_chunk = self.ary[slice_list]
+        ct_chunk = self.ary[tuple(slice_list)]
 
         return ct_chunk, center_irc
 
@@ -131,6 +131,7 @@ def getCtRawNodule(series_uid, center_xyz, width_irc):
     ct_chunk, center_irc = ct.getRawNodule(center_xyz, width_irc)
     return ct_chunk, center_irc
 
+
 class LunaDataset(Dataset):
     def __init__(self,
                  test_stride=0,
@@ -143,7 +144,6 @@ class LunaDataset(Dataset):
         if series_uid:
             self.noduleInfo_list = [x for x in self.noduleInfo_list if x[2] == series_uid]
 
-        # __init__ continued...
         if test_stride > 1:
             if isTestSet_bool:
                 self.noduleInfo_list = self.noduleInfo_list[::test_stride]
@@ -165,26 +165,26 @@ class LunaDataset(Dataset):
             "testing" if isTestSet_bool else "training",
         ))
 
-
     def __len__(self):
-        # if self.ratio_int:
-        #     return min(len(self.benignIndex_list), len(self.malignantIndex_list)) * 4 * 90
-        # else:
         return len(self.noduleInfo_list)
 
     def __getitem__(self, ndx):
-        sample_ndx = ndx
+        nodule_tup = self.noduleInfo_list[ndx]
+        width_irc = (24, 48, 48)
 
-        isMalignant_bool, _diameter_mm, series_uid, center_xyz = self.noduleInfo_list[sample_ndx]
-
-        nodule_ary, center_irc = getCtRawNodule(series_uid, center_xyz, (32, 32, 32))
-
-        nodule_tensor = torch.from_numpy(nodule_ary)
+        nodule_ary, center_irc = getCtRawNodule(
+            nodule_tup.series_uid,
+            nodule_tup.center_xyz,
+            width_irc,
+        )
+        nodule_tensor = torch.from_numpy(nodule_ary).to(torch.float32)
         nodule_tensor = nodule_tensor.unsqueeze(0)
 
-        malignant_tensor = torch.tensor([isMalignant_bool], dtype=torch.float32)
+        cls_tensor = torch.tensor([
+                not nodule_tup.isMalignant_bool,
+                nodule_tup.isMalignant_bool
+            ],
+            dtype=torch.long,
+        )
 
-        return nodule_tensor, malignant_tensor, series_uid, center_irc
-
-
-
+        return nodule_tensor, cls_tensor, nodule_tup.series_uid, center_irc

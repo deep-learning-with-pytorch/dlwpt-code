@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 from p2ch09.dsets import Ct, LunaDataset
 
-clim=(0.0, 1.3)
+clim=(-1000.0, 300)
 
 def findMalignantSamples(start_ndx=0, limit=100):
     ds = LunaDataset()
