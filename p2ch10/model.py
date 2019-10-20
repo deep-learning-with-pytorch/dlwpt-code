@@ -15,7 +15,7 @@ class LunaModel(nn.Module):
     def __init__(self, layer_count=4, in_channels=1, conv_channels=8):
         super().__init__()
 
-        self.input_batchnorm = nn.BatchNorm2d(1)
+        self.input_batchnorm = nn.BatchNorm3d(1)
 
         layer_list = []
         for layer_ndx in range(layer_count):

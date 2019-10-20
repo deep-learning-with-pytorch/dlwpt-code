@@ -133,12 +133,12 @@ def _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad):
 
     transform_ary = intrans_ary @ inscale_ary @ rotation_ary.T @ outscale_ary @ outtrans_ary
     grid_ary = reorder_ary @ rotation_ary.T @ outscale_ary @ outtrans_ary
-    transform_tensor = torch.from_numpy((rotation_ary)).to(device, torch.float32)
+    transform_t = torch.from_numpy((rotation_ary)).to(device, torch.float32)
 
-    transform_tensor = transform_tensor[:2].unsqueeze(0)
+    transform_t = transform_t[:2].unsqueeze(0)
 
-    print('transform_tensor', transform_tensor.size(), transform_tensor.dtype, transform_tensor.device)
-    print(transform_tensor)
+    print('transform_t', transform_t.size(), transform_t.dtype, transform_t.device)
+    print(transform_t)
     print('outtrans_ary', outtrans_ary.shape, outtrans_ary.dtype)
     print(outtrans_ary.round(3))
     print('outscale_ary', outscale_ary.shape, outscale_ary.dtype)
@@ -168,7 +168,7 @@ def _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad):
     prtf([0, 2])
     prtf(output_center[2:])
 
-    return transform_tensor, transform_ary, grid_ary
+    return transform_t, transform_ary, grid_ary
 
 def _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axis_vector):
     print("_buildEquivalentTransforms2d", device, input_size, output_size, angle_rad * 180 / math.pi, axis_vector)
@@ -232,11 +232,11 @@ def _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axi
 
     transform_ary = intrans_ary @ inscale_ary @ np.linalg.inv(scipyRotation_ary) @ outscale_ary @ outtrans_ary
     grid_ary = reorder_ary @ np.linalg.inv(scipyRotation_ary) @ outscale_ary @ outtrans_ary
-    transform_tensor = torch.from_numpy((torchRotation_ary)).to(device, torch.float32)
-    transform_tensor = transform_tensor[:3].unsqueeze(0)
+    transform_t = torch.from_numpy((torchRotation_ary)).to(device, torch.float32)
+    transform_t = transform_t[:3].unsqueeze(0)
 
-    print('transform_tensor', transform_tensor.size(), transform_tensor.dtype, transform_tensor.device)
-    print(transform_tensor)
+    print('transform_t', transform_t.size(), transform_t.dtype, transform_t.device)
+    print(transform_t)
     print('outtrans_ary', outtrans_ary.shape, outtrans_ary.dtype)
     print(outtrans_ary.round(3))
     print('outscale_ary', outscale_ary.shape, outscale_ary.dtype)
@@ -273,7 +273,7 @@ def _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axi
 
     prtf(output_center[2:])
 
-    return transform_tensor, transform_ary, grid_ary
+    return transform_t, transform_ary, grid_ary
 
 
 def test_affine_2d_rotate0(device, affine_func2d):
@@ -282,7 +282,7 @@ def test_affine_2d_rotate0(device, affine_func2d):
     output_size = [1, 1, 5, 5]
     angle_rad = 0.
 
-    transform_tensor, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+    transform_t, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
     # reference
     # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -302,17 +302,17 @@ def test_affine_2d_rotate0(device, affine_func2d):
     print('scipy_ary', scipy_ary.shape, scipy_ary.dtype)
     print(scipy_ary)
 
-    affine_tensor = affine_func2d(
-            transform_tensor,
+    affine_t = affine_func2d(
+            transform_t,
             torch.Size(output_size)
         )
 
-    print('affine_tensor', affine_tensor.size(), affine_tensor.dtype, affine_tensor.device)
-    print(affine_tensor)
+    print('affine_t', affine_t.size(), affine_t.dtype, affine_t.device)
+    print(affine_t)
 
     gridsample_ary = torch.nn.functional.grid_sample(
             torch.tensor(input_ary, device=device).to(device),
-            affine_tensor,
+            affine_t,
             padding_mode='border'
         ).to('cpu').numpy()
 
@@ -333,7 +333,7 @@ def test_affine_2d_rotate90(device, affine_func2d, input_size2dsq, output_size2d
     output_size = output_size2dsq
     angle_rad = 0.25 * math.pi * 2
 
-    transform_tensor, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+    transform_t, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
     # reference
     # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -360,17 +360,17 @@ def test_affine_2d_rotate90(device, affine_func2d, input_size2dsq, output_size2d
     assert np.abs(scipy_ary[-1,-1] - input_ary[0,0,-1,0]).max() < 1e-6
     assert np.abs(scipy_ary[-1,0] - input_ary[0,0,0,0]).max() < 1e-6
 
-    affine_tensor = affine_func2d(
-            transform_tensor,
+    affine_t = affine_func2d(
+            transform_t,
             torch.Size(output_size)
         )
 
-    print('affine_tensor', affine_tensor.size(), affine_tensor.dtype, affine_tensor.device)
-    print(affine_tensor)
+    print('affine_t', affine_t.size(), affine_t.dtype, affine_t.device)
+    print(affine_t)
 
     gridsample_ary = torch.nn.functional.grid_sample(
             torch.tensor(input_ary, device=device).to(device),
-            affine_tensor,
+            affine_t,
             padding_mode='border'
         ).to('cpu').numpy()
 
@@ -393,7 +393,7 @@ def test_affine_2d_rotate45(device, affine_func2d):
     output_size = [1, 1, 3, 3]
     angle_rad = 0.125 * math.pi * 2
 
-    transform_tensor, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+    transform_t, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
     # reference
     # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -413,17 +413,17 @@ def test_affine_2d_rotate45(device, affine_func2d):
     print('scipy_ary', scipy_ary.shape, scipy_ary.dtype)
     print(scipy_ary)
 
-    affine_tensor = affine_func2d(
-            transform_tensor,
+    affine_t = affine_func2d(
+            transform_t,
             torch.Size(output_size)
         )
 
-    print('affine_tensor', affine_tensor.size(), affine_tensor.dtype, affine_tensor.device)
-    print(affine_tensor)
+    print('affine_t', affine_t.size(), affine_t.dtype, affine_t.device)
+    print(affine_t)
 
     gridsample_ary = torch.nn.functional.grid_sample(
             torch.tensor(input_ary, device=device).to(device),
-            affine_tensor,
+            affine_t,
             padding_mode='border'
         ).to('cpu').numpy()
 
@@ -447,7 +447,7 @@ def test_affine_2d_rotateRandom(device, affine_func2d, angle_rad, input_size2d, 
     input_ary[0,0,-1,0] = 6
     input_ary[0,0,-1,-1] = 8
 
-    transform_tensor, transform_ary, grid_ary = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+    transform_t, transform_ary, grid_ary = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
     # reference
     # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -462,22 +462,22 @@ def test_affine_2d_rotateRandom(device, affine_func2d, angle_rad, input_size2d, 
         # cval=0.0,
         prefilter=False)
 
-    affine_tensor = affine_func2d(
-            transform_tensor,
+    affine_t = affine_func2d(
+            transform_t,
             torch.Size(output_size)
         )
 
-    print('affine_tensor', affine_tensor.size(), affine_tensor.dtype, affine_tensor.device)
-    print(affine_tensor)
+    print('affine_t', affine_t.size(), affine_t.dtype, affine_t.device)
+    print(affine_t)
 
-    for r in range(affine_tensor.size(1)):
-        for c in range(affine_tensor.size(2)):
+    for r in range(affine_t.size(1)):
+        for c in range(affine_t.size(2)):
             grid_out = grid_ary @ [r, c, 1]
-            print(r, c, 'affine:', affine_tensor[0,r,c], 'grid:', grid_out[:2])
+            print(r, c, 'affine:', affine_t[0,r,c], 'grid:', grid_out[:2])
 
     gridsample_ary = torch.nn.functional.grid_sample(
             torch.tensor(input_ary, device=device).to(device),
-            affine_tensor,
+            affine_t,
             padding_mode='border'
         ).to('cpu').numpy()
 
@@ -488,14 +488,14 @@ def test_affine_2d_rotateRandom(device, affine_func2d, angle_rad, input_size2d, 
     print('scipy_ary', scipy_ary.shape, scipy_ary.dtype)
     print(scipy_ary.round(3))
 
-    for r in range(affine_tensor.size(1)):
-        for c in range(affine_tensor.size(2)):
+    for r in range(affine_t.size(1)):
+        for c in range(affine_t.size(2)):
             grid_out = grid_ary @ [r, c, 1]
 
             try:
-                assert np.allclose(affine_tensor[0,r,c], grid_out[:2], atol=1e-5)
+                assert np.allclose(affine_t[0,r,c], grid_out[:2], atol=1e-5)
             except:
-                print(r, c, 'affine:', affine_tensor[0,r,c], 'grid:', grid_out[:2])
+                print(r, c, 'affine:', affine_t[0,r,c], 'grid:', grid_out[:2])
                 raise
 
     assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
@@ -515,7 +515,7 @@ def test_affine_3d_rotateRandom(device, affine_func3d, angle_rad, axis_vector, i
     input_ary[0,0, -1, -1,  0] = 8
     input_ary[0,0, -1, -1, -1] = 9
 
-    transform_tensor, transform_ary, grid_ary = _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axis_vector)
+    transform_t, transform_ary, grid_ary = _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axis_vector)
 
     # reference
     # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -530,26 +530,26 @@ def test_affine_3d_rotateRandom(device, affine_func3d, angle_rad, axis_vector, i
         # cval=0.0,
         prefilter=False)
 
-    affine_tensor = affine_func3d(
-            transform_tensor,
+    affine_t = affine_func3d(
+            transform_t,
             torch.Size(output_size)
         )
 
-    print('affine_tensor', affine_tensor.size(), affine_tensor.dtype, affine_tensor.device)
-    print(affine_tensor)
+    print('affine_t', affine_t.size(), affine_t.dtype, affine_t.device)
+    print(affine_t)
 
-    for i in range(affine_tensor.size(1)):
-        for r in range(affine_tensor.size(2)):
-            for c in range(affine_tensor.size(3)):
+    for i in range(affine_t.size(1)):
+        for r in range(affine_t.size(2)):
+            for c in range(affine_t.size(3)):
                 grid_out = grid_ary @ [i, r, c, 1]
-                print(i, r, c, 'affine:', affine_tensor[0,i,r,c], 'grid:', grid_out[:3].round(3))
+                print(i, r, c, 'affine:', affine_t[0,i,r,c], 'grid:', grid_out[:3].round(3))
 
     print('input_ary', input_ary.shape, input_ary.dtype)
     print(input_ary.round(3))
 
     gridsample_ary = torch.nn.functional.grid_sample(
             torch.tensor(input_ary, device=device).to(device),
-            affine_tensor,
+            affine_t,
             padding_mode='border'
         ).to('cpu').numpy()
 
@@ -558,14 +558,14 @@ def test_affine_3d_rotateRandom(device, affine_func3d, angle_rad, axis_vector, i
     print('scipy_ary', scipy_ary.shape, scipy_ary.dtype)
     print(scipy_ary.round(3))
 
-    for i in range(affine_tensor.size(1)):
-        for r in range(affine_tensor.size(2)):
-            for c in range(affine_tensor.size(3)):
+    for i in range(affine_t.size(1)):
+        for r in range(affine_t.size(2)):
+            for c in range(affine_t.size(3)):
                 grid_out = grid_ary @ [i, r, c, 1]
                 try:
-                    assert np.allclose(affine_tensor[0,i,r,c], grid_out[:3], atol=1e-5)
+                    assert np.allclose(affine_t[0,i,r,c], grid_out[:3], atol=1e-5)
                 except:
-                    print(i, r, c, 'affine:', affine_tensor[0,i,r,c], 'grid:', grid_out[:3].round(3))
+                    print(i, r, c, 'affine:', affine_t[0,i,r,c], 'grid:', grid_out[:3].round(3))
                     raise
 
     assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5

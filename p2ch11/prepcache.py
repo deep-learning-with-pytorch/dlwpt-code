@@ -60,4 +60,4 @@ class LunaPrepCacheApp(object):
 
 
 if __name__ == '__main__':
-    sys.exit(LunaPrepCacheApp().main() or 0)
+    LunaPrepCacheApp().main()

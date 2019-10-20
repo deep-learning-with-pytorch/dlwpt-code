@@ -2,22 +2,17 @@ import copy
 import csv
 import functools
 import glob
-import math
 import os
 import random
 
 from collections import namedtuple
 
 import SimpleITK as sitk
-
 import numpy as np
+
 import torch
 import torch.cuda
 from torch.utils.data import Dataset
-import torch.nn as nn
-import torch.nn.functional as F
-
-import numpy as np
 
 from util.disk import getCache
 from util.util import XyzTuple, xyz2irc
@@ -80,18 +75,18 @@ class Ct(object):
         mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
-        ct_ary = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
+        ct_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
 
         # CTs are natively expressed in https://en.wikipedia.org/wiki/Hounsfield_scale
         # HU are scaled oddly, with 0 g/cc (air, approximately) being -1000 and 1 g/cc (water) being 0.
         # This gets rid of negative density stuff used to indicate out-of-FOV
-        ct_ary[ct_ary < -1000] = -1000
+        ct_a[ct_a < -1000] = -1000
 
         # This nukes any weird hotspots and clamps bone down
-        ct_ary[ct_ary > 1000] = 1000
+        ct_a[ct_a > 1000] = 1000
 
         self.series_uid = series_uid
-        self.ary = ct_ary
+        self.hu_a = ct_a
 
         self.origin_xyz = XyzTuple(*ct_mhd.GetOrigin())
         self.vxSize_xyz = XyzTuple(*ct_mhd.GetSpacing())
@@ -105,23 +100,23 @@ class Ct(object):
             start_ndx = int(round(center_val - width_irc[axis]/2))
             end_ndx = int(start_ndx + width_irc[axis])
 
-            assert center_val >= 0 and center_val < self.ary.shape[axis], repr([self.series_uid, center_xyz, self.origin_xyz, self.vxSize_xyz, center_irc, axis])
+            assert center_val >= 0 and center_val < self.hu_a.shape[axis], repr([self.series_uid, center_xyz, self.origin_xyz, self.vxSize_xyz, center_irc, axis])
 
             if start_ndx < 0:
                 # log.warning("Crop outside of CT array: {} {}, center:{} shape:{} width:{}".format(
-                #     self.series_uid, center_xyz, center_irc, self.ary.shape, width_irc))
+                #     self.series_uid, center_xyz, center_irc, self.hu_a.shape, width_irc))
                 start_ndx = 0
                 end_ndx = int(width_irc[axis])
 
-            if end_ndx > self.ary.shape[axis]:
+            if end_ndx > self.hu_a.shape[axis]:
                 # log.warning("Crop outside of CT array: {} {}, center:{} shape:{} width:{}".format(
-                #     self.series_uid, center_xyz, center_irc, self.ary.shape, width_irc))
-                end_ndx = self.ary.shape[axis]
-                start_ndx = int(self.ary.shape[axis] - width_irc[axis])
+                #     self.series_uid, center_xyz, center_irc, self.hu_a.shape, width_irc))
+                end_ndx = self.hu_a.shape[axis]
+                start_ndx = int(self.hu_a.shape[axis] - width_irc[axis])
 
             slice_list.append(slice(start_ndx, end_ndx))
 
-        ct_chunk = self.ary[tuple(slice_list)]
+        ct_chunk = self.hu_a[tuple(slice_list)]
 
         return ct_chunk, center_irc
 
@@ -136,181 +131,62 @@ def getCtRawNodule(series_uid, center_xyz, width_irc):
     ct_chunk, center_irc = ct.getRawNodule(center_xyz, width_irc)
     return ct_chunk, center_irc
 
-def getCtAugmentedNodule(
-        augmentation_dict,
-        series_uid, center_xyz, width_irc,
-        use_cache=True):
-    if use_cache:
-        ct_chunk, center_irc = getCtRawNodule(series_uid, center_xyz, width_irc)
-    else:
-        ct = getCt(series_uid)
-        ct_chunk, center_irc = ct.getRawNodule(center_xyz, width_irc)
-
-    ct_tensor = torch.tensor(ct_chunk).unsqueeze(0).unsqueeze(0).to(torch.float32)
-
-    transform_tensor = torch.eye(4).to(torch.float64)
-    # ... <1>
-
-    for i in range(3):
-        if 'flip' in augmentation_dict:
-            if random.random() > 0.5:
-                transform_tensor[i,i] *= -1
-
-        if 'offset' in augmentation_dict:
-            offset_float = augmentation_dict['offset']
-            random_float = (random.random() * 2 - 1)
-            transform_tensor[3,i] = offset_float * random_float
-
-        if 'scale' in augmentation_dict:
-            scale_float = augmentation_dict['scale']
-            random_float = (random.random() * 2 - 1)
-            transform_tensor[i,i] *= 1.0 + scale_float * random_float
-
-
-    if 'rotate' in augmentation_dict:
-        angle_rad = random.random() * math.pi * 2
-        s = math.sin(angle_rad)
-        c = math.cos(angle_rad)
-
-        rotation_tensor = torch.tensor([
-            [c, -s, 0, 0],
-            [s, c, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1],
-        ], dtype=torch.float64)
-
-        transform_tensor @= rotation_tensor
-
-    affine_tensor = F.affine_grid(
-            transform_tensor[:3].unsqueeze(0).to(torch.float32),
-            ct_tensor.size(),
-        )
-
-    augmented_chunk = F.grid_sample(
-            ct_tensor,
-            affine_tensor,
-            padding_mode='border'
-        ).to('cpu')
-
-    if 'noise' in augmentation_dict:
-        noise_tensor = torch.randn_like(augmented_chunk)
-        noise_tensor *= augmentation_dict['noise']
-
-        augmented_chunk += noise_tensor
-
-    return augmented_chunk[0], center_irc
-
 
 class LunaDataset(Dataset):
     def __init__(self,
-                 test_stride=0,
-                 isTestSet_bool=None,
+                 val_stride=0,
+                 isValSet_bool=None,
                  series_uid=None,
                  sortby_str='random',
-                 ratio_int=0,
-                 augmentation_dict=None,
-                 noduleInfo_list=None,
             ):
-        self.ratio_int = ratio_int
-        self.augmentation_dict = augmentation_dict
-
-        if noduleInfo_list:
-            self.noduleInfo_list = copy.copy(noduleInfo_list)
-            self.use_cache = False
-        else:
-            self.noduleInfo_list = copy.copy(getNoduleInfoList())
-            self.use_cache = True
+        self.noduleInfo_list = copy.copy(getNoduleInfoList())
 
         if series_uid:
             self.noduleInfo_list = [x for x in self.noduleInfo_list if x.series_uid == series_uid]
 
-        if test_stride > 1:
-            if isTestSet_bool:
-                self.noduleInfo_list = self.noduleInfo_list[::test_stride]
-            else:
-                del self.noduleInfo_list[::test_stride]
+        if isValSet_bool:
+            assert val_stride > 0, val_stride
+            self.noduleInfo_list = self.noduleInfo_list[::val_stride]
+            assert self.noduleInfo_list
+        elif val_stride > 0:
+            del self.noduleInfo_list[::val_stride]
+            assert self.noduleInfo_list
 
         if sortby_str == 'random':
             random.shuffle(self.noduleInfo_list)
         elif sortby_str == 'series_uid':
-            self.noduleInfo_list.sort(key=lambda x: (x[2], x[3])) # sorting by series_uid, center_xyz)
+            self.noduleInfo_list.sort(key=lambda x: (x.series_uid, x.center_xyz))
         elif sortby_str == 'malignancy_size':
             pass
         else:
             raise Exception("Unknown sort: " + repr(sortby_str))
 
-        self.benign_list = [nt for nt in self.noduleInfo_list if not nt.isMalignant_bool]
-        self.malignant_list = [nt for nt in self.noduleInfo_list if nt.isMalignant_bool]
-
-        log.info("{!r}: {} {} samples, {} ben, {} mal, {} ratio".format(
+        log.info("{!r}: {} {} samples".format(
             self,
             len(self.noduleInfo_list),
-            "testing" if isTestSet_bool else "training",
-            len(self.benign_list),
-            len(self.malignant_list),
-            '{}:1'.format(self.ratio_int) if self.ratio_int else 'unbalanced'
+            "validation" if isValSet_bool else "training",
         ))
 
-    def shuffleSamples(self):
-        if self.ratio_int:
-            random.shuffle(self.benign_list)
-            random.shuffle(self.malignant_list)
-
     def __len__(self):
-        if self.ratio_int:
-            return 200000
-        else:
-            return len(self.noduleInfo_list)
+        return len(self.noduleInfo_list)
 
     def __getitem__(self, ndx):
-        if self.ratio_int:
-            malignant_ndx = ndx // (self.ratio_int + 1)
+        nodule_tup = self.noduleInfo_list[ndx]
+        width_irc = (32, 48, 48)
 
-            if ndx % (self.ratio_int + 1):
-                benign_ndx = ndx - 1 - malignant_ndx
-                benign_ndx %= len(self.benign_list)
-                nodule_tup = self.benign_list[benign_ndx]
-            else:
-                malignant_ndx %= len(self.malignant_list)
-                nodule_tup = self.malignant_list[malignant_ndx]
-        else:
-            nodule_tup = self.noduleInfo_list[ndx]
+        nodule_a, center_irc = getCtRawNodule(
+            nodule_tup.series_uid,
+            nodule_tup.center_xyz,
+            width_irc,
+        )
+        nodule_t = torch.from_numpy(nodule_a).to(torch.float32)
+        nodule_t = nodule_t.unsqueeze(0)
 
-        width_irc = (24, 48, 48)
-
-        if self.augmentation_dict:
-            nodule_t, center_irc = getCtAugmentedNodule(
-                self.augmentation_dict,
-                nodule_tup.series_uid,
-                nodule_tup.center_xyz,
-                width_irc,
-                self.use_cache,
-            )
-        elif self.use_cache:
-            nodule_ary, center_irc = getCtRawNodule(
-                nodule_tup.series_uid,
-                nodule_tup.center_xyz,
-                width_irc,
-            )
-            nodule_t = torch.from_numpy(nodule_ary).to(torch.float32)
-            nodule_t = nodule_t.unsqueeze(0)
-        else:
-            ct = getCt(nodule_tup.series_uid)
-            nodule_ary, center_irc = ct.getRawNodule(
-                nodule_tup.center_xyz,
-                width_irc,
-            )
-            nodule_t = torch.from_numpy(nodule_ary).to(torch.float32)
-            nodule_t = nodule_t.unsqueeze(0)
-
-        malignant_tensor = torch.tensor([
+        malignant_t = torch.tensor([
                 not nodule_tup.isMalignant_bool,
                 nodule_tup.isMalignant_bool
             ],
             dtype=torch.long,
         )
 
-        return nodule_t, malignant_tensor, nodule_tup.series_uid, center_irc
-
-
-
+        return nodule_t, malignant_t, nodule_tup.series_uid, torch.tensor(center_irc)

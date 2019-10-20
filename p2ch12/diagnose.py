@@ -52,7 +52,7 @@ class LunaDiagnoseApp(object):
         )
 
         parser.add_argument('--include-train',
-            help="Include data that was in the training set. (default: test data only)",
+            help="Include data that was in the training set. (default: validation data only)",
             action='store_true',
             default=False,
         )
@@ -177,13 +177,13 @@ class LunaDiagnoseApp(object):
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
-        test_ds = LunaDataset(
-            test_stride=10,
-            isTestSet_bool=True,
+        val_ds = LunaDataset(
+            val_stride=10,
+            isValSet_bool=True,
         )
-        test_set = set(
+        val_set = set(
             noduleInfo_tup.series_uid
-            for noduleInfo_tup in test_ds.noduleInfo_list
+            for noduleInfo_tup in val_ds.noduleInfo_list
         )
         malignant_set = set(
             noduleInfo_tup.series_uid
@@ -199,22 +199,22 @@ class LunaDiagnoseApp(object):
                 for noduleInfo_tup in getNoduleInfoList()
             )
 
-        train_list = sorted(series_set - test_set) if self.cli_args.include_train else []
-        test_list = sorted(series_set & test_set)
+        train_list = sorted(series_set - val_set) if self.cli_args.include_train else []
+        val_list = sorted(series_set & val_set)
 
 
         noduleInfo_list = []
         series_iter = enumerateWithEstimate(
-            test_list + train_list,
+            val_list + train_list,
             "Series",
         )
         for _series_ndx, series_uid in series_iter:
-            ct, output_ary, _mask_ary, clean_ary = self.segmentCt(series_uid)
+            ct, output_a, _mask_a, clean_a = self.segmentCt(series_uid)
 
             noduleInfo_list += self.clusterSegmentationOutput(
                 series_uid,
                 ct,
-                clean_ary,
+                clean_a,
             )
 
             # if _series_ndx > 10:
@@ -230,21 +230,21 @@ class LunaDiagnoseApp(object):
             start_ndx=cls_dl.num_workers,
         )
         for batch_ndx, batch_tup in batch_iter:
-            input_tensor, _, series_list, center_list = batch_tup
+            input_t, _, series_list, center_list = batch_tup
 
-            input_devtensor = input_tensor.to(self.device)
+            input_g = input_t.to(self.device)
             with torch.no_grad():
-                _logits_devtensor, probability_devtensor = self.cls_model(input_devtensor)
+                _logits_g, probability_g = self.cls_model(input_g)
 
             classifications_list = zip(
                 series_list,
                 center_list,
-                probability_devtensor[:,1].to('cpu'),
+                probability_g[:,1].to('cpu'),
             )
 
             for cls_tup in classifications_list:
-                series_uid, center_irc, probablity_tensor = cls_tup
-                probablity_float = probablity_tensor.item()
+                series_uid, center_irc, probablity_t = cls_tup
+                probablity_float = probablity_t.item()
 
                 this_tup = (probablity_float, tuple(center_irc))
                 current_tup = series2diagnosis_dict.get(series_uid, this_tup)
@@ -257,60 +257,54 @@ class LunaDiagnoseApp(object):
                     log.debug([(type(x), x) for x in this_tup] + [(type(x), x) for x in current_tup])
                     raise
 
-                # self.logResults(
-                #     'Testing' if isTest_bool else 'Training',
-                #     [(series_uid, series2diagnosis_dict[series_uid])],
-                #     malignant_set,
-                # )
-
         log.info('Training set:')
         self.logResults('Training', train_list, series2diagnosis_dict, malignant_set)
 
-        log.info('Testing set:')
-        self.logResults('Testing', test_list, series2diagnosis_dict, malignant_set)
+        log.info('Validation set:')
+        self.logResults('Validation', val_list, series2diagnosis_dict, malignant_set)
 
     def segmentCt(self, series_uid):
         with torch.no_grad():
             ct = getCt(series_uid)
 
-            output_ary = np.zeros_like(ct.ary, dtype=np.float32)
+            output_a = np.zeros_like(ct.hu_a, dtype=np.float32)
 
             seg_dl = self.initSegmentationDl(series_uid)
             for batch_tup in seg_dl:
-                input_tensor = batch_tup[0]
+                input_t = batch_tup[0]
                 ndx_list = batch_tup[6]
 
-                input_devtensor = input_tensor.to(self.device)
-                prediction_devtensor = self.seg_model(input_devtensor)
+                input_g = input_t.to(self.device)
+                prediction_g = self.seg_model(input_g)
 
                 for i, sample_ndx in enumerate(ndx_list):
-                    output_ary[sample_ndx] = prediction_devtensor[i].cpu().numpy()
+                    output_a[sample_ndx] = prediction_g[i].cpu().numpy()
 
-            mask_ary = output_ary > 0.5
-            clean_ary = morph.binary_erosion(mask_ary, iterations=1)
-            clean_ary = morph.binary_dilation(clean_ary, iterations=2)
+            mask_a = output_a > 0.5
+            clean_a = morph.binary_erosion(mask_a, iterations=1)
+            clean_a = morph.binary_dilation(clean_a, iterations=2)
 
-        return ct, output_ary, mask_ary, clean_ary
+        return ct, output_a, mask_a, clean_a
 
-    def clusterSegmentationOutput(self, series_uid,  ct, clean_ary):
-        noduleLabel_ary, nodule_count = measure.label(clean_ary)
+    def clusterSegmentationOutput(self, series_uid,  ct, clean_a):
+        noduleLabel_a, nodule_count = measure.label(clean_a)
         centerIrc_list = measure.center_of_mass(
-            ct.ary + 1001,
-            labels=noduleLabel_ary,
+            ct.hu_a + 1001,
+            labels=noduleLabel_a,
             index=list(range(1, nodule_count+1)),
         )
 
         # n = 1298
         # log.debug([
-        #     (noduleLabel_ary == n).sum(),
-        #     np.where(noduleLabel_ary == n),
+        #     (noduleLabel_a == n).sum(),
+        #     np.where(noduleLabel_a == n),
         #
-        #     ct.ary[noduleLabel_ary == n].sum(),
-        #     (ct.ary + 1000)[noduleLabel_ary == n].sum(),
+        #     ct.hu_a[noduleLabel_a == n].sum(),
+        #     (ct.hu_a + 1000)[noduleLabel_a == n].sum(),
         # ])
 
-        if nodule_count < 2:
-            centerIrc_list = [centerIrc_list]
+        # if nodule_count == 1:
+        #     centerIrc_list = [centerIrc_list]
 
         noduleInfo_list = []
         for i, center_irc in enumerate(centerIrc_list):

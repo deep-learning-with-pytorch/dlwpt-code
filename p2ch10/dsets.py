@@ -3,13 +3,12 @@ import csv
 import functools
 import glob
 import os
-import random
 
 from collections import namedtuple
 
 import SimpleITK as sitk
-
 import numpy as np
+
 import torch
 import torch.cuda
 from torch.utils.data import Dataset
@@ -75,18 +74,18 @@ class Ct(object):
         mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
-        ct_ary = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
+        ct_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
 
         # CTs are natively expressed in https://en.wikipedia.org/wiki/Hounsfield_scale
         # HU are scaled oddly, with 0 g/cc (air, approximately) being -1000 and 1 g/cc (water) being 0.
         # This gets rid of negative density stuff used to indicate out-of-FOV
-        ct_ary[ct_ary < -1000] = -1000
+        ct_a[ct_a < -1000] = -1000
 
         # This nukes any weird hotspots and clamps bone down
-        ct_ary[ct_ary > 1000] = 1000
+        ct_a[ct_a > 1000] = 1000
 
         self.series_uid = series_uid
-        self.ary = ct_ary
+        self.hu_a = ct_a
 
         self.origin_xyz = XyzTuple(*ct_mhd.GetOrigin())
         self.vxSize_xyz = XyzTuple(*ct_mhd.GetSpacing())
@@ -100,23 +99,23 @@ class Ct(object):
             start_ndx = int(round(center_val - width_irc[axis]/2))
             end_ndx = int(start_ndx + width_irc[axis])
 
-            assert center_val >= 0 and center_val < self.ary.shape[axis], repr([self.series_uid, center_xyz, self.origin_xyz, self.vxSize_xyz, center_irc, axis])
+            assert center_val >= 0 and center_val < self.hu_a.shape[axis], repr([self.series_uid, center_xyz, self.origin_xyz, self.vxSize_xyz, center_irc, axis])
 
             if start_ndx < 0:
                 # log.warning("Crop outside of CT array: {} {}, center:{} shape:{} width:{}".format(
-                #     self.series_uid, center_xyz, center_irc, self.ary.shape, width_irc))
+                #     self.series_uid, center_xyz, center_irc, self.hu_a.shape, width_irc))
                 start_ndx = 0
                 end_ndx = int(width_irc[axis])
 
-            if end_ndx > self.ary.shape[axis]:
+            if end_ndx > self.hu_a.shape[axis]:
                 # log.warning("Crop outside of CT array: {} {}, center:{} shape:{} width:{}".format(
-                #     self.series_uid, center_xyz, center_irc, self.ary.shape, width_irc))
-                end_ndx = self.ary.shape[axis]
-                start_ndx = int(self.ary.shape[axis] - width_irc[axis])
+                #     self.series_uid, center_xyz, center_irc, self.hu_a.shape, width_irc))
+                end_ndx = self.hu_a.shape[axis]
+                start_ndx = int(self.hu_a.shape[axis] - width_irc[axis])
 
             slice_list.append(slice(start_ndx, end_ndx))
 
-        ct_chunk = self.ary[tuple(slice_list)]
+        ct_chunk = self.hu_a[tuple(slice_list)]
 
         return ct_chunk, center_irc
 
@@ -131,38 +130,29 @@ def getCtRawNodule(series_uid, center_xyz, width_irc):
     ct_chunk, center_irc = ct.getRawNodule(center_xyz, width_irc)
     return ct_chunk, center_irc
 
-
 class LunaDataset(Dataset):
     def __init__(self,
-                 test_stride=0,
-                 isTestSet_bool=None,
+                 val_stride=0,
+                 isValSet_bool=None,
                  series_uid=None,
-                 sortby_str='random',
             ):
         self.noduleInfo_list = copy.copy(getNoduleInfoList())
 
         if series_uid:
-            self.noduleInfo_list = [x for x in self.noduleInfo_list if x[2] == series_uid]
+            self.noduleInfo_list = [x for x in self.noduleInfo_list if x.series_uid == series_uid]
 
-        if test_stride > 1:
-            if isTestSet_bool:
-                self.noduleInfo_list = self.noduleInfo_list[::test_stride]
-            else:
-                del self.noduleInfo_list[::test_stride]
-
-        if sortby_str == 'random':
-            random.shuffle(self.noduleInfo_list)
-        elif sortby_str == 'series_uid':
-            self.noduleInfo_list.sort(key=lambda x: (x[2], x[3])) # sorting by series_uid, center_xyz)
-        elif sortby_str == 'malignancy_size':
-            pass
-        else:
-            raise Exception("Unknown sort: " + repr(sortby_str))
+        if isValSet_bool:
+            assert val_stride > 0, val_stride
+            self.noduleInfo_list = self.noduleInfo_list[::val_stride]
+            assert self.noduleInfo_list
+        elif val_stride > 0:
+            del self.noduleInfo_list[::val_stride]
+            assert self.noduleInfo_list
 
         log.info("{!r}: {} {} samples".format(
             self,
             len(self.noduleInfo_list),
-            "testing" if isTestSet_bool else "training",
+            "validation" if isValSet_bool else "training",
         ))
 
     def __len__(self):
@@ -170,21 +160,23 @@ class LunaDataset(Dataset):
 
     def __getitem__(self, ndx):
         nodule_tup = self.noduleInfo_list[ndx]
-        width_irc = (24, 48, 48)
+        width_irc = (32, 48, 48)
 
-        nodule_ary, center_irc = getCtRawNodule(
+        nodule_a, center_irc = getCtRawNodule(
             nodule_tup.series_uid,
             nodule_tup.center_xyz,
             width_irc,
         )
-        nodule_tensor = torch.from_numpy(nodule_ary).to(torch.float32)
-        nodule_tensor = nodule_tensor.unsqueeze(0)
 
-        cls_tensor = torch.tensor([
+        nodule_t = torch.from_numpy(nodule_a)
+        nodule_t = nodule_t.to(torch.float32)
+        nodule_t = nodule_t.unsqueeze(0)
+
+        malignant_t = torch.tensor([
                 not nodule_tup.isMalignant_bool,
                 nodule_tup.isMalignant_bool
             ],
             dtype=torch.long,
         )
 
-        return nodule_tensor, cls_tensor, nodule_tup.series_uid, center_irc
+        return nodule_t, malignant_t, nodule_tup.series_uid, torch.tensor(center_irc)

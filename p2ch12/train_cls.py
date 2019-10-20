@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 # log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
-# Used for computeBatchLoss and logMetrics to index into metrics_tensor/metrics_ary
+# Used for computeBatchLoss and logMetrics to index into metrics_t/metrics_a
 METRICS_LABEL_NDX=0
 METRICS_PRED_NDX=1
 METRICS_LOSS_NDX=2
@@ -101,7 +101,7 @@ class LunaTrainingApp(object):
 
         self.totalTrainingSamples_count = 0
         self.trn_writer = None
-        self.tst_writer = None
+        self.val_writer = None
 
         self.augmentation_dict = {}
         if self.cli_args.augmented or self.cli_args.augment_flip:
@@ -136,8 +136,8 @@ class LunaTrainingApp(object):
 
     def initTrainDl(self):
         train_ds = LunaDataset(
-            test_stride=10,
-            isTestSet_bool=False,
+            val_stride=10,
+            isValSet_bool=False,
             ratio_int=int(self.cli_args.balanced),
             augmentation_dict=self.augmentation_dict,
         )
@@ -151,35 +151,34 @@ class LunaTrainingApp(object):
 
         return train_dl
 
-    def initTestDl(self):
-        test_ds = LunaDataset(
-            test_stride=10,
-            isTestSet_bool=True,
+    def initValDl(self):
+        val_ds = LunaDataset(
+            val_stride=10,
+            isValSet_bool=True,
         )
 
-        test_dl = DataLoader(
-            test_ds,
+        val_dl = DataLoader(
+            val_ds,
             batch_size=self.cli_args.batch_size * (torch.cuda.device_count() if self.use_cuda else 1),
             num_workers=self.cli_args.num_workers,
             pin_memory=self.use_cuda,
         )
 
-        return test_dl
+        return val_dl
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
             log_dir = os.path.join('runs', self.cli_args.tb_prefix, self.time_str)
 
             self.trn_writer = SummaryWriter(log_dir=log_dir + '_trn_cls_' + self.cli_args.comment)
-            self.tst_writer = SummaryWriter(log_dir=log_dir + '_tst_cls_' + self.cli_args.comment)
-# eng::tb_writer[]
+            self.val_writer = SummaryWriter(log_dir=log_dir + '_val_cls_' + self.cli_args.comment)
 
 
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
         train_dl = self.initTrainDl()
-        test_dl = self.initTestDl()
+        val_dl = self.initValDl()
 
         best_score = 0.0
 
@@ -189,29 +188,32 @@ class LunaTrainingApp(object):
                 epoch_ndx,
                 self.cli_args.epochs,
                 len(train_dl),
-                len(test_dl),
+                len(val_dl),
                 self.cli_args.batch_size,
                 (torch.cuda.device_count() if self.use_cuda else 1),
             ))
 
-            trnMetrics_tensor = self.doTraining(epoch_ndx, train_dl)
-            self.logMetrics(epoch_ndx, 'trn', trnMetrics_tensor)
+            trnMetrics_t = self.doTraining(epoch_ndx, train_dl)
+            self.logMetrics(epoch_ndx, 'trn', trnMetrics_t)
 
-            tstMetrics_tensor = self.doTesting(epoch_ndx, test_dl)
-            score = self.logMetrics(epoch_ndx, 'tst', tstMetrics_tensor)
+            valMetrics_t = self.doValidation(epoch_ndx, val_dl)
+            score = self.logMetrics(epoch_ndx, 'val', valMetrics_t)
             best_score = max(score, best_score)
 
             self.saveModel('cls', epoch_ndx, score == best_score)
 
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
-            self.tst_writer.close()
+            self.val_writer.close()
 
 
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
         train_dl.dataset.shuffleSamples()
-        trainingMetrics_devtensor = torch.zeros(METRICS_SIZE, len(train_dl.dataset)).to(self.device)
+        trnMetrics_g = torch.zeros(
+                METRICS_SIZE,
+                len(train_dl.dataset),
+            ).to(self.device)
         batch_iter = enumerateWithEstimate(
             train_dl,
             "E{} Training".format(epoch_ndx),
@@ -224,67 +226,68 @@ class LunaTrainingApp(object):
                 batch_ndx,
                 batch_tup,
                 train_dl.batch_size,
-                trainingMetrics_devtensor
+                trnMetrics_g
             )
 
             loss_var.backward()
             self.optimizer.step()
             del loss_var
 
-        self.totalTrainingSamples_count += trainingMetrics_devtensor.size(1)
+        self.totalTrainingSamples_count += trnMetrics_g.size(1)
 
-        return trainingMetrics_devtensor.to('cpu')
+        return trnMetrics_g.to('cpu')
 
 
-    def doTesting(self, epoch_ndx, test_dl):
+    def doValidation(self, epoch_ndx, val_dl):
         with torch.no_grad():
             self.model.eval()
-            testingMetrics_devtensor = torch.zeros(METRICS_SIZE, len(test_dl.dataset)).to(self.device)
+            valMetrics_g = torch.zeros(
+                    METRICS_SIZE,
+                    len(val_dl.dataset),
+                ).to(self.device)
             batch_iter = enumerateWithEstimate(
-                test_dl,
-                "E{} Testing ".format(epoch_ndx),
-                start_ndx=test_dl.num_workers,
+                val_dl,
+                "E{} Validation ".format(epoch_ndx),
+                start_ndx=val_dl.num_workers,
             )
             for batch_ndx, batch_tup in batch_iter:
-                self.computeBatchLoss(batch_ndx, batch_tup, test_dl.batch_size, testingMetrics_devtensor)
+                self.computeBatchLoss(
+                    batch_ndx,
+                    batch_tup,
+                    val_dl.batch_size,
+                    valMetrics_g,
+                )
 
-        return testingMetrics_devtensor.to('cpu')
+        return valMetrics_g.to('cpu')
 
 
 
-    def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics_devtensor):
-        input_tensor, label_tensor, _series_list, _center_list = batch_tup
+    def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics_g):
+        input_t, label_t, _series_list, _center_list = batch_tup
 
-        input_devtensor = input_tensor.to(self.device, non_blocking=True)
-        label_devtensor = label_tensor.to(self.device, non_blocking=True)
+        input_g = input_t.to(self.device, non_blocking=True)
+        label_g = label_t.to(self.device, non_blocking=True)
 
-        logits_devtensor, probability_devtensor = self.model(input_devtensor)
-
-        # log.debug(['input', input_devtensor.min().item(), input_devtensor.max().item()])
-        # log.debug(['label', label_devtensor.min().item(), label_devtensor.max().item()])
-        # log.debug(['logits', logits_devtensor.min().item(), logits_devtensor.max().item()])
-        # log.debug(['probability', probability_devtensor.min().item(), probability_devtensor.max().item()])
+        logits_g, probability_g = self.model(input_g)
 
         loss_func = nn.CrossEntropyLoss(reduction='none')
-        loss_devtensor = loss_func(logits_devtensor, label_devtensor[:,1])
-
-        # log.debug(['loss', loss_devtensor.min().item(), loss_devtensor.max().item()])
+        loss_g = loss_func(logits_g, label_g[:,1])
 
         start_ndx = batch_ndx * batch_size
-        end_ndx = start_ndx + label_tensor.size(0)
+        end_ndx = start_ndx + label_t.size(0)
 
-        metrics_devtensor[METRICS_LABEL_NDX, start_ndx:end_ndx] = label_devtensor[:,1]
-        metrics_devtensor[METRICS_PRED_NDX, start_ndx:end_ndx] = probability_devtensor[:,1]
-        metrics_devtensor[METRICS_LOSS_NDX, start_ndx:end_ndx] = loss_devtensor
+        metrics_g[METRICS_LABEL_NDX, start_ndx:end_ndx] = label_g[:,1]
+        metrics_g[METRICS_PRED_NDX, start_ndx:end_ndx] = probability_g[:,1]
+        metrics_g[METRICS_LOSS_NDX, start_ndx:end_ndx] = loss_g
 
-        return loss_devtensor.mean()
+        return loss_g.mean()
 
 
     def logMetrics(
             self,
             epoch_ndx,
             mode_str,
-            metrics_tensor,
+            metrics_t,
     ):
         self.initTensorboardWriters()
         log.info("E{} {}".format(
@@ -292,11 +295,11 @@ class LunaTrainingApp(object):
             type(self).__name__,
         ))
 
-        metrics_ary = metrics_tensor.cpu().detach().numpy()
-#         assert np.isfinite(metrics_ary).all()
+        metrics_a = metrics_t.cpu().detach().numpy()
+#         assert np.isfinite(metrics_a).all()
 
-        benLabel_mask = metrics_ary[METRICS_LABEL_NDX] <= 0.5
-        benPred_mask = metrics_ary[METRICS_PRED_NDX] <= 0.5
+        benLabel_mask = metrics_a[METRICS_LABEL_NDX] <= 0.5
+        benPred_mask = metrics_a[METRICS_PRED_NDX] <= 0.5
 
         malLabel_mask = ~benLabel_mask
         malPred_mask = ~benPred_mask
@@ -311,18 +314,21 @@ class LunaTrainingApp(object):
         falseNeg_count = malLabel_count - malCorrect_count
 
         metrics_dict = {}
-        metrics_dict['loss/all'] = metrics_ary[METRICS_LOSS_NDX].mean()
-        metrics_dict['loss/ben'] = metrics_ary[METRICS_LOSS_NDX, benLabel_mask].mean()
-        metrics_dict['loss/mal'] = metrics_ary[METRICS_LOSS_NDX, malLabel_mask].mean()
+        metrics_dict['loss/all'] = metrics_a[METRICS_LOSS_NDX].mean()
+        metrics_dict['loss/ben'] = metrics_a[METRICS_LOSS_NDX, benLabel_mask].mean()
+        metrics_dict['loss/mal'] = metrics_a[METRICS_LOSS_NDX, malLabel_mask].mean()
 
-        metrics_dict['correct/all'] = (malCorrect_count + benCorrect_count) / metrics_ary.shape[1] * 100
+        metrics_dict['correct/all'] = (malCorrect_count + benCorrect_count) / metrics_a.shape[1] * 100
         metrics_dict['correct/ben'] = (benCorrect_count) / benLabel_count * 100
         metrics_dict['correct/mal'] = (malCorrect_count) / malLabel_count * 100
 
-        precision = metrics_dict['pr/precision'] = truePos_count / (truePos_count + falsePos_count)
-        recall    = metrics_dict['pr/recall']    = truePos_count / (truePos_count + falseNeg_count)
+        precision = metrics_dict['pr/precision'] = \
+            truePos_count / (truePos_count + falsePos_count)
+        recall = metrics_dict['pr/recall'] = \
+            truePos_count / (truePos_count + falseNeg_count)
 
-        metrics_dict['pr/f1_score'] = 2 * (precision * recall) / (precision + recall)
+        metrics_dict['pr/f1_score'] = 2 * (precision * recall)\
+            / (precision + recall)
 
         log.info(
             ("E{} {:8} "
@@ -340,7 +346,8 @@ class LunaTrainingApp(object):
         log.info(
             ("E{} {:8} "
                  + "{loss/ben:.4f} loss, "
-                 + "{correct/ben:-5.1f}% correct ({benCorrect_count:} of {benLabel_count:})"
+                 + "{correct/ben:-5.1f}% correct "
+                 + "({benCorrect_count:} of {benLabel_count:})"
             ).format(
                 epoch_ndx,
                 mode_str + '_ben',
@@ -352,7 +359,8 @@ class LunaTrainingApp(object):
         log.info(
             ("E{} {:8} "
                  + "{loss/mal:.4f} loss, "
-                 + "{correct/mal:-5.1f}% correct ({malCorrect_count:} of {malLabel_count:})"
+                 + "{correct/mal:-5.1f}% correct "
+                 + "({malCorrect_count:} of {malLabel_count:})"
             ).format(
                 epoch_ndx,
                 mode_str + '_mal',
@@ -368,27 +376,27 @@ class LunaTrainingApp(object):
 
         writer.add_pr_curve(
             'pr',
-            metrics_ary[METRICS_LABEL_NDX],
-            metrics_ary[METRICS_PRED_NDX],
+            metrics_a[METRICS_LABEL_NDX],
+            metrics_a[METRICS_PRED_NDX],
             self.totalTrainingSamples_count,
         )
 
         bins = [x/50.0 for x in range(51)]
 
-        benHist_mask = benLabel_mask & (metrics_ary[METRICS_PRED_NDX] > 0.01)
-        malHist_mask = malLabel_mask & (metrics_ary[METRICS_PRED_NDX] < 0.99)
+        benHist_mask = benLabel_mask & (metrics_a[METRICS_PRED_NDX] > 0.01)
+        malHist_mask = malLabel_mask & (metrics_a[METRICS_PRED_NDX] < 0.99)
 
         if benHist_mask.any():
             writer.add_histogram(
                 'is_ben',
-                metrics_ary[METRICS_PRED_NDX, benHist_mask],
+                metrics_a[METRICS_PRED_NDX, benHist_mask],
                 self.totalTrainingSamples_count,
                 bins=bins,
             )
         if malHist_mask.any():
             writer.add_histogram(
                 'is_mal',
-                metrics_ary[METRICS_PRED_NDX, malHist_mask],
+                metrics_a[METRICS_PRED_NDX, malHist_mask],
                 self.totalTrainingSamples_count,
                 bins=bins,
             )

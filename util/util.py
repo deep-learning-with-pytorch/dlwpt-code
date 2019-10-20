@@ -17,29 +17,37 @@ IrcTuple = collections.namedtuple('IrcTuple', ['index', 'row', 'col'])
 XyzTuple = collections.namedtuple('XyzTuple', ['x', 'y', 'z'])
 
 def xyz2irc(coord_xyz, origin_xyz, vxSize_xyz, direction_tup):
-    # Note: _cri means Col,Row,Index
     if direction_tup == (1, 0, 0, 0, 1, 0, 0, 0, 1):
         direction_ary = np.ones((3,))
     elif direction_tup == (-1, 0, 0, 0, -1, 0, 0, 0, 1):
         direction_ary = np.array((-1, -1, 1))
     else:
-        raise Exception("Unsupported direction_tup: {}".format(direction_tup))
+        raise Exception(
+            "Unsupported direction_tup: {}".format(direction_tup),
+        )
 
-    coord_cri = (np.array(coord_xyz) - np.array(origin_xyz)) / np.array(vxSize_xyz)
+    coord_cri = (
+            np.array(coord_xyz)
+            - np.array(origin_xyz)
+        ) / np.array(vxSize_xyz)
     coord_cri *= direction_ary
     return IrcTuple(*list(reversed(coord_cri.tolist())))
 
 def irc2xyz(coord_irc, origin_xyz, vxSize_xyz, direction_tup):
-    # Note: _cri means Col,Row,Index
     coord_cri = np.array(list(reversed(coord_irc)))
     if direction_tup == (1, 0, 0, 0, 1, 0, 0, 0, 1):
         direction_ary = np.ones((3,))
     elif direction_tup == (-1, 0, 0, 0, -1, 0, 0, 0, 1):
         direction_ary = np.array((-1, -1, 1))
     else:
-        raise Exception("Unsupported direction_tup: {}".format(direction_tup))
+        raise Exception(
+            "Unsupported direction_tup: {}".format(direction_tup),
+        )
 
-    coord_xyz = coord_cri * direction_ary * np.array(vxSize_xyz) + np.array(origin_xyz)
+    coord_xyz = coord_cri \
+        * direction_ary \
+        * np.array(vxSize_xyz) \
+        + np.array(origin_xyz)
     return XyzTuple(*coord_xyz.tolist())
 
 
@@ -150,7 +158,14 @@ def prhist(ary, prefix_str=None, **kwargs):
 #     print('{:10,}'.format(total_bytes), "total bytes")
 
 
-def enumerateWithEstimate(iter, desc_str, start_ndx=0, print_ndx=4, backoff=2, iter_len=None):
+def enumerateWithEstimate(
+        iter,
+        desc_str,
+        start_ndx=0,
+        print_ndx=4,
+        backoff=2,
+        iter_len=None,
+):
     """
     In terms of behavior, `enumerateWithEstimate` is almost identical
     to the standard `enumerate` (the differences are things like how

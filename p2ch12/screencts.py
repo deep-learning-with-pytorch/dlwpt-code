@@ -29,7 +29,7 @@ class LunaScreenCtDataset(Dataset):
     def __getitem__(self, ndx):
         series_uid = self.series_list[ndx]
         ct = getCt(series_uid)
-        mid_ndx = ct.ary.shape[0] // 2
+        mid_ndx = ct.hu_a.shape[0] // 2
 
         air_mask, lung_mask, dense_mask, denoise_mask, tissue_mask, body_mask, altben_mask = ct.build2dLungMask(mid_ndx)
 
