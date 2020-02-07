@@ -28,7 +28,7 @@ METRICS_PRED_NDX=1
 METRICS_LOSS_NDX=2
 METRICS_SIZE = 3
 
-class LunaTrainingApp(object):
+class LunaTrainingApp:
     def __init__(self, sys_argv=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
@@ -50,7 +50,7 @@ class LunaTrainingApp(object):
             type=int,
         )
         parser.add_argument('--balanced',
-            help="Balance the training data to half benign, half malignant.",
+            help="Balance the training data to half positive, half negative.",
             action='store_true',
             default=False,
         )
@@ -70,7 +70,7 @@ class LunaTrainingApp(object):
             default=False,
         )
         parser.add_argument('--augment-scale',
-            help="Augment the training data by randomly increasing or decreasing the size of the nodule.",
+            help="Augment the training data by randomly increasing or decreasing the size of the candidate.",
             action='store_true',
             default=False,
         )
@@ -142,9 +142,13 @@ class LunaTrainingApp(object):
             augmentation_dict=self.augmentation_dict,
         )
 
+        batch_size = self.cli_args.batch_size
+        if self.use_cuda:
+            batch_size *= torch.cuda.device_count()
+
         train_dl = DataLoader(
             train_ds,
-            batch_size=self.cli_args.batch_size * (torch.cuda.device_count() if self.use_cuda else 1),
+            batch_size=batch_size,
             num_workers=self.cli_args.num_workers,
             pin_memory=self.use_cuda,
         )
@@ -157,9 +161,13 @@ class LunaTrainingApp(object):
             isValSet_bool=True,
         )
 
+        batch_size = self.cli_args.batch_size
+        if self.use_cuda:
+            batch_size *= torch.cuda.device_count()
+
         val_dl = DataLoader(
             val_ds,
-            batch_size=self.cli_args.batch_size * (torch.cuda.device_count() if self.use_cuda else 1),
+            batch_size=batch_size,
             num_workers=self.cli_args.num_workers,
             pin_memory=self.use_cuda,
         )
@@ -170,8 +178,10 @@ class LunaTrainingApp(object):
         if self.trn_writer is None:
             log_dir = os.path.join('runs', self.cli_args.tb_prefix, self.time_str)
 
-            self.trn_writer = SummaryWriter(log_dir=log_dir + '-trn_cls-' + self.cli_args.comment)
-            self.val_writer = SummaryWriter(log_dir=log_dir + '-val_cls-' + self.cli_args.comment)
+            self.trn_writer = SummaryWriter(
+                log_dir=log_dir + '-trn_cls-' + self.cli_args.comment)
+            self.val_writer = SummaryWriter(
+                log_dir=log_dir + '-val_cls-' + self.cli_args.comment)
 
 
     def main(self):
@@ -205,7 +215,12 @@ class LunaTrainingApp(object):
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
         train_dl.dataset.shuffleSamples()
-        trnMetrics_g = torch.zeros(METRICS_SIZE, len(train_dl.dataset)).to(self.device)
+        trnMetrics_g = torch.zeros(
+            METRICS_SIZE,
+            len(train_dl.dataset),
+            device=self.device,
+        )
+
         batch_iter = enumerateWithEstimate(
             train_dl,
             "E{} Training".format(epoch_ndx),
@@ -218,12 +233,11 @@ class LunaTrainingApp(object):
                 batch_ndx,
                 batch_tup,
                 train_dl.batch_size,
-                trnMetrics_g
+                trnMetrics_g,
             )
 
             loss_var.backward()
             self.optimizer.step()
-            del loss_var
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
@@ -233,14 +247,24 @@ class LunaTrainingApp(object):
     def doValidation(self, epoch_ndx, val_dl):
         with torch.no_grad():
             self.model.eval()
-            valMetrics_g = torch.zeros(METRICS_SIZE, len(val_dl.dataset)).to(self.device)
+            valMetrics_g = torch.zeros(
+                METRICS_SIZE,
+                len(val_dl.dataset),
+                device=self.device,
+            )
+
             batch_iter = enumerateWithEstimate(
                 val_dl,
                 "E{} Validation ".format(epoch_ndx),
                 start_ndx=val_dl.num_workers,
             )
             for batch_ndx, batch_tup in batch_iter:
-                self.computeBatchLoss(batch_ndx, batch_tup, val_dl.batch_size, valMetrics_g)
+                self.computeBatchLoss(
+                    batch_ndx,
+                    batch_tup,
+                    val_dl.batch_size,
+                    valMetrics_g,
+                )
 
         return valMetrics_g.to('cpu')
 
@@ -274,6 +298,7 @@ class LunaTrainingApp(object):
             epoch_ndx,
             mode_str,
             metrics_t,
+            classificationThreshold=0.5,
     ):
         self.initTensorboardWriters()
         log.info("E{} {}".format(
@@ -281,34 +306,34 @@ class LunaTrainingApp(object):
             type(self).__name__,
         ))
 
-        benLabel_mask = metrics_t[METRICS_LABEL_NDX] <= 0.5
-        benPred_mask = metrics_t[METRICS_PRED_NDX] <= 0.5
+        negLabel_mask = metrics_t[METRICS_LABEL_NDX] <= classificationThreshold
+        negPred_mask = metrics_t[METRICS_PRED_NDX] <= classificationThreshold
 
-        malLabel_mask = ~benLabel_mask
-        malPred_mask = ~benPred_mask
+        posLabel_mask = ~negLabel_mask
+        posPred_mask = ~negPred_mask
 
-        ben_count = int(benLabel_mask.sum())
-        mal_count = int(malLabel_mask.sum())
+        neg_count = int(negLabel_mask.sum())
+        pos_count = int(posLabel_mask.sum())
 
-        trueNeg_count = ben_correct = int((benLabel_mask & benPred_mask).sum())
-        truePos_count = mal_correct = int((malLabel_mask & malPred_mask).sum())
+        trueNeg_count = neg_correct = int((negLabel_mask & negPred_mask).sum())
+        truePos_count = pos_correct = int((posLabel_mask & posPred_mask).sum())
 
-        falsePos_count = ben_count - ben_correct
-        falseNeg_count = mal_count - mal_correct
+        falsePos_count = neg_count - neg_correct
+        falseNeg_count = pos_count - pos_correct
 
         metrics_dict = {}
         metrics_dict['loss/all'] = metrics_t[METRICS_LOSS_NDX].mean()
-        metrics_dict['loss/ben'] = metrics_t[METRICS_LOSS_NDX, benLabel_mask].mean()
-        metrics_dict['loss/mal'] = metrics_t[METRICS_LOSS_NDX, malLabel_mask].mean()
+        metrics_dict['loss/neg'] = metrics_t[METRICS_LOSS_NDX, negLabel_mask].mean()
+        metrics_dict['loss/pos'] = metrics_t[METRICS_LOSS_NDX, posLabel_mask].mean()
 
-        metrics_dict['correct/all'] = (mal_correct + ben_correct) / metrics_t.shape[1] * 100
-        metrics_dict['correct/ben'] = (ben_correct) / ben_count * 100
-        metrics_dict['correct/mal'] = (mal_correct) / mal_count * 100
+        metrics_dict['correct/all'] = (pos_correct + neg_correct) / metrics_t.shape[1] * 100
+        metrics_dict['correct/neg'] = (neg_correct) / neg_count * 100
+        metrics_dict['correct/pos'] = (pos_correct) / pos_count * 100
 
         precision = metrics_dict['pr/precision'] = \
-            truePos_count / np.float64(truePos_count + falsePos_count)
+            truePos_count / np.float32(truePos_count + falsePos_count)
         recall    = metrics_dict['pr/recall'] = \
-            truePos_count / np.float64(truePos_count + falseNeg_count)
+            truePos_count / np.float32(truePos_count + falseNeg_count)
 
         metrics_dict['pr/f1_score'] = \
             2 * (precision * recall) / (precision + recall)
@@ -326,24 +351,24 @@ class LunaTrainingApp(object):
             )
         )
         log.info(
-            ("E{} {:8} {loss/ben:.4f} loss, "
-                 + "{correct/ben:-5.1f}% correct ({ben_correct:} of {ben_count:})"
+            ("E{} {:8} {loss/neg:.4f} loss, "
+                 + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})"
             ).format(
                 epoch_ndx,
-                mode_str + '_ben',
-                ben_correct=ben_correct,
-                ben_count=ben_count,
+                mode_str + '_neg',
+                neg_correct=neg_correct,
+                neg_count=neg_count,
                 **metrics_dict,
             )
         )
         log.info(
-            ("E{} {:8} {loss/mal:.4f} loss, "
-                 + "{correct/mal:-5.1f}% correct ({mal_correct:} of {mal_count:})"
+            ("E{} {:8} {loss/pos:.4f} loss, "
+                 + "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})"
             ).format(
                 epoch_ndx,
-                mode_str + '_mal',
-                mal_correct=mal_correct,
-                mal_count=mal_count,
+                mode_str + '_pos',
+                pos_correct=pos_correct,
+                pos_count=pos_count,
                 **metrics_dict,
             )
         )
@@ -361,20 +386,20 @@ class LunaTrainingApp(object):
 
         bins = [x/50.0 for x in range(51)]
 
-        benHist_mask = benLabel_mask & (metrics_t[METRICS_PRED_NDX] > 0.01)
-        malHist_mask = malLabel_mask & (metrics_t[METRICS_PRED_NDX] < 0.99)
+        negHist_mask = negLabel_mask & (metrics_t[METRICS_PRED_NDX] > 0.01)
+        posHist_mask = posLabel_mask & (metrics_t[METRICS_PRED_NDX] < 0.99)
 
-        if benHist_mask.any():
+        if negHist_mask.any():
             writer.add_histogram(
-                'is_ben',
-                metrics_t[METRICS_PRED_NDX, benHist_mask],
+                'is_neg',
+                metrics_t[METRICS_PRED_NDX, negHist_mask],
                 self.totalTrainingSamples_count,
                 bins=bins,
             )
-        if malHist_mask.any():
+        if posHist_mask.any():
             writer.add_histogram(
-                'is_mal',
-                metrics_t[METRICS_PRED_NDX, malHist_mask],
+                'is_pos',
+                metrics_t[METRICS_PRED_NDX, posHist_mask],
                 self.totalTrainingSamples_count,
                 bins=bins,
             )
@@ -403,7 +428,7 @@ class LunaTrainingApp(object):
     #                 writer.add_histogram(
     #                     name.rsplit('.', 1)[-1] + '/' + name,
     #                     param.data.cpu().numpy(),
-    #                     # metrics_a[METRICS_PRED_NDX, benHist_mask],
+    #                     # metrics_a[METRICS_PRED_NDX, negHist_mask],
     #                     self.totalTrainingSamples_count,
     #                     # bins=bins,
     #                 )

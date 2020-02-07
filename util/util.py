@@ -16,39 +16,21 @@ log.setLevel(logging.DEBUG)
 IrcTuple = collections.namedtuple('IrcTuple', ['index', 'row', 'col'])
 XyzTuple = collections.namedtuple('XyzTuple', ['x', 'y', 'z'])
 
-def xyz2irc(coord_xyz, origin_xyz, vxSize_xyz, direction_tup):
-    if direction_tup == (1, 0, 0, 0, 1, 0, 0, 0, 1):
-        direction_ary = np.ones((3,))
-    elif direction_tup == (-1, 0, 0, 0, -1, 0, 0, 0, 1):
-        direction_ary = np.array((-1, -1, 1))
-    else:
-        raise Exception(
-            "Unsupported direction_tup: {}".format(direction_tup),
-        )
+def irc2xyz(coord_irc, origin_xyz, vxSize_xyz, direction_a):
+    cri_a = np.array(coord_irc)[::-1]
+    origin_a = np.array(origin_xyz)
+    vxSize_a = np.array(vxSize_xyz)
+    coords_xyz = (direction_a @ (cri_a * vxSize_a)) + origin_a
+    # coords_xyz = (direction_a @ (idx * vxSize_a)) + origin_a
+    return XyzTuple(*coords_xyz)
 
-    coord_cri = (
-            np.array(coord_xyz)
-            - np.array(origin_xyz)
-        ) / np.array(vxSize_xyz)
-    coord_cri *= direction_ary
-    return IrcTuple(*list(reversed(coord_cri.tolist())))
-
-def irc2xyz(coord_irc, origin_xyz, vxSize_xyz, direction_tup):
-    coord_cri = np.array(list(reversed(coord_irc)))
-    if direction_tup == (1, 0, 0, 0, 1, 0, 0, 0, 1):
-        direction_ary = np.ones((3,))
-    elif direction_tup == (-1, 0, 0, 0, -1, 0, 0, 0, 1):
-        direction_ary = np.array((-1, -1, 1))
-    else:
-        raise Exception(
-            "Unsupported direction_tup: {}".format(direction_tup),
-        )
-
-    coord_xyz = coord_cri \
-        * direction_ary \
-        * np.array(vxSize_xyz) \
-        + np.array(origin_xyz)
-    return XyzTuple(*coord_xyz.tolist())
+def xyz2irc(coord_xyz, origin_xyz, vxSize_xyz, direction_a):
+    origin_a = np.array(origin_xyz)
+    vxSize_a = np.array(vxSize_xyz)
+    coord_a = np.array(coord_xyz)
+    cri_a = ((coord_a - origin_a) @ np.linalg.inv(direction_a)) / vxSize_a
+    cri_a = np.round(cri_a)
+    return IrcTuple(int(cri_a[2]), int(cri_a[1]), int(cri_a[0]))
 
 
 def importstr(module_str, from_=None):
@@ -163,7 +145,7 @@ def enumerateWithEstimate(
         desc_str,
         start_ndx=0,
         print_ndx=4,
-        backoff=2,
+        backoff=None,
         iter_len=None,
 ):
     """
@@ -212,7 +194,8 @@ def enumerateWithEstimate(
         so by default we double the gap between logging messages each
         time after the first.
 
-        `backoff` defaults to `2`.
+        `backoff` defaults to `2` unless iter_len is > 1000, in which
+        case it defaults to `4`.
 
     :param iter_len: Since we need to know the number of items to
         estimate when the loop will finish, that can be provided by
@@ -223,6 +206,11 @@ def enumerateWithEstimate(
     """
     if iter_len is None:
         iter_len = len(iter)
+
+    if backoff is None:
+        backoff = 2
+        while backoff ** 7 < iter_len:
+            backoff *= 2
 
     assert backoff >= 2
     while print_ndx < start_ndx * backoff:

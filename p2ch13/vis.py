@@ -1,40 +1,46 @@
 import matplotlib
-matplotlib.use('nbagg')
+# matplotlib.use('nbagg')
 
-import numpy as np
 import matplotlib.pyplot as plt
 
+
+import torch
+
+import numpy as np
+
 from p2ch13.dsets import Ct, LunaDataset
+from p2ch13.model_seg import SegmentationMask, MaskTuple
+
 
 clim=(-1000.0, 300)
 
-def findMalignantSamples(start_ndx=0, limit=100):
-    ds = LunaDataset(sortby_str='malignancy_size')
+def findPositiveSamples(start_ndx=0, limit=100):
+    ds = LunaDataset(sortby_str='label_and_size')
 
-    malignantSample_list = []
-    for sample_tup in ds.noduleInfo_list:
-        if sample_tup.isMalignant_bool:
-            print(len(malignantSample_list), sample_tup)
-            malignantSample_list.append(sample_tup)
+    positiveSample_list = []
+    for sample_tup in ds.candidateInfo_list:
+        if sample_tup.isNodule_bool:
+            print(len(positiveSample_list), sample_tup)
+            positiveSample_list.append(sample_tup)
 
-        if len(malignantSample_list) >= limit:
+        if len(positiveSample_list) >= limit:
             break
 
-    return malignantSample_list
+    return positiveSample_list
 
-def showNodule(series_uid, batch_ndx=None, **kwargs):
+def showCandidate(series_uid, batch_ndx=None, **kwargs):
     ds = LunaDataset(series_uid=series_uid, **kwargs)
-    malignant_list = [i for i, x in enumerate(ds.noduleInfo_list) if x.isMalignant_bool]
+    pos_list = [i for i, x in enumerate(ds.candidateInfo_list) if x.isNodule_bool]
 
     if batch_ndx is None:
-        if malignant_list:
-            batch_ndx = malignant_list[0]
+        if pos_list:
+            batch_ndx = pos_list[0]
         else:
-            print("Warning: no malignant samples found; using first non-malignant sample.")
+            print("Warning: no positive samples found; using first negative sample.")
             batch_ndx = 0
 
     ct = Ct(series_uid)
-    ct_t, malignant_t, series_uid, center_irc = ds[batch_ndx]
+    ct_t, pos_t, series_uid, center_irc = ds[batch_ndx]
     ct_a = ct_t[0].numpy()
 
     fig = plt.figure(figsize=(30, 50))
@@ -94,6 +100,18 @@ def showNodule(series_uid, batch_ndx=None, **kwargs):
             plt.imshow(ct_a[index], clim=clim, cmap='gray')
 
 
-    print(series_uid, batch_ndx, bool(malignant_t[0]), malignant_list)
+    print(series_uid, batch_ndx, bool(pos_t[0]), pos_list)
 
 
+def build2dLungMask(series_uid, center_ndx):
+    mask_model = SegmentationMask().to('cuda')
+    ct = Ct(series_uid)
+
+    ct_g = torch.from_numpy(ct.hu_a[center_ndx].astype(np.float32)).unsqueeze(0).unsqueeze(0).to('cuda')
+    pos_g = torch.from_numpy(ct.positive_mask[center_ndx].astype(np.float32)).unsqueeze(0).unsqueeze(0).to('cuda')
+    input_g = ct_g / 1000
+
+    label_g, neg_g, pos_g, lung_mask, mask_dict = mask_model(input_g, pos_g)
+    mask_tup = MaskTuple(**mask_dict)
+
+    return mask_tup

@@ -8,33 +8,33 @@ from p2ch10.dsets import Ct, LunaDataset
 
 clim=(-1000.0, 300)
 
-def findMalignantSamples(start_ndx=0, limit=100):
+def findPositiveSamples(start_ndx=0, limit=100):
     ds = LunaDataset()
 
-    malignantSample_list = []
-    for sample_tup in ds.noduleInfo_list:
-        if sample_tup.isMalignant_bool:
-            print(len(malignantSample_list), sample_tup)
-            malignantSample_list.append(sample_tup)
+    positiveSample_list = []
+    for sample_tup in ds.candidateInfo_list:
+        if sample_tup.isNodule_bool:
+            print(len(positiveSample_list), sample_tup)
+            positiveSample_list.append(sample_tup)
 
-        if len(malignantSample_list) >= limit:
+        if len(positiveSample_list) >= limit:
             break
 
-    return malignantSample_list
+    return positiveSample_list
 
-def showNodule(series_uid, batch_ndx=None, **kwargs):
+def showCandidate(series_uid, batch_ndx=None, **kwargs):
     ds = LunaDataset(series_uid=series_uid, **kwargs)
-    malignant_list = [i for i, x in enumerate(ds.noduleInfo_list) if x.isMalignant_bool]
+    pos_list = [i for i, x in enumerate(ds.candidateInfo_list) if x.isNodule_bool]
 
     if batch_ndx is None:
-        if malignant_list:
-            batch_ndx = malignant_list[0]
+        if pos_list:
+            batch_ndx = pos_list[0]
         else:
-            print("Warning: no malignant samples found; using first non-malignant sample.")
+            print("Warning: no positive samples found; using first negative sample.")
             batch_ndx = 0
 
     ct = Ct(series_uid)
-    ct_t, malignant_t, series_uid, center_irc = ds[batch_ndx]
+    ct_t, pos_t, series_uid, center_irc = ds[batch_ndx]
     ct_a = ct_t[0].numpy()
 
     fig = plt.figure(figsize=(30, 50))
@@ -46,40 +46,40 @@ def showNodule(series_uid, batch_ndx=None, **kwargs):
     ]
 
     subplot = fig.add_subplot(len(group_list) + 2, 3, 1)
-    subplot.set_title('index {}'.format(int(center_irc.index)), fontsize=30)
+    subplot.set_title('index {}'.format(int(center_irc[0])), fontsize=30)
     for label in (subplot.get_xticklabels() + subplot.get_yticklabels()):
         label.set_fontsize(20)
-    plt.imshow(ct.hu_a[int(center_irc.index)], clim=clim, cmap='gray')
+    plt.imshow(ct.hu_a[int(center_irc[0])], clim=clim, cmap='gray')
 
     subplot = fig.add_subplot(len(group_list) + 2, 3, 2)
-    subplot.set_title('row {}'.format(int(center_irc.row)), fontsize=30)
+    subplot.set_title('row {}'.format(int(center_irc[1])), fontsize=30)
     for label in (subplot.get_xticklabels() + subplot.get_yticklabels()):
         label.set_fontsize(20)
-    plt.imshow(ct.hu_a[:,int(center_irc.row)], clim=clim, cmap='gray')
+    plt.imshow(ct.hu_a[:,int(center_irc[1])], clim=clim, cmap='gray')
     plt.gca().invert_yaxis()
 
     subplot = fig.add_subplot(len(group_list) + 2, 3, 3)
-    subplot.set_title('col {}'.format(int(center_irc.col)), fontsize=30)
+    subplot.set_title('col {}'.format(int(center_irc[2])), fontsize=30)
     for label in (subplot.get_xticklabels() + subplot.get_yticklabels()):
         label.set_fontsize(20)
-    plt.imshow(ct.hu_a[:,:,int(center_irc.col)], clim=clim, cmap='gray')
+    plt.imshow(ct.hu_a[:,:,int(center_irc[2])], clim=clim, cmap='gray')
     plt.gca().invert_yaxis()
 
     subplot = fig.add_subplot(len(group_list) + 2, 3, 4)
-    subplot.set_title('index {}'.format(int(center_irc.index)), fontsize=30)
+    subplot.set_title('index {}'.format(int(center_irc[0])), fontsize=30)
     for label in (subplot.get_xticklabels() + subplot.get_yticklabels()):
         label.set_fontsize(20)
     plt.imshow(ct_a[ct_a.shape[0]//2], clim=clim, cmap='gray')
 
     subplot = fig.add_subplot(len(group_list) + 2, 3, 5)
-    subplot.set_title('row {}'.format(int(center_irc.row)), fontsize=30)
+    subplot.set_title('row {}'.format(int(center_irc[1])), fontsize=30)
     for label in (subplot.get_xticklabels() + subplot.get_yticklabels()):
         label.set_fontsize(20)
     plt.imshow(ct_a[:,ct_a.shape[1]//2], clim=clim, cmap='gray')
     plt.gca().invert_yaxis()
 
     subplot = fig.add_subplot(len(group_list) + 2, 3, 6)
-    subplot.set_title('col {}'.format(int(center_irc.col)), fontsize=30)
+    subplot.set_title('col {}'.format(int(center_irc[2])), fontsize=30)
     for label in (subplot.get_xticklabels() + subplot.get_yticklabels()):
         label.set_fontsize(20)
     plt.imshow(ct_a[:,:,ct_a.shape[2]//2], clim=clim, cmap='gray')
@@ -94,6 +94,6 @@ def showNodule(series_uid, batch_ndx=None, **kwargs):
             plt.imshow(ct_a[index], clim=clim, cmap='gray')
 
 
-    print(series_uid, batch_ndx, bool(malignant_t[0]), malignant_list)
+    print(series_uid, batch_ndx, bool(pos_t[0]), pos_list)
 
 

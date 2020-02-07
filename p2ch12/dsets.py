@@ -27,10 +27,10 @@ log.setLevel(logging.DEBUG)
 
 raw_cache = getCache('part2ch12_raw')
 
-NoduleInfoTuple = namedtuple('NoduleInfoTuple', 'isMalignant_bool, diameter_mm, series_uid, center_xyz')
+CandidateInfoTuple = namedtuple('CandidateInfoTuple', 'isNodule_bool, diameter_mm, series_uid, center_xyz')
 
 @functools.lru_cache(1)
-def getNoduleInfoList(requireDataOnDisk_bool=True):
+def getCandidateInfoList(requireDataOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
@@ -46,7 +46,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
 
             diameter_dict.setdefault(series_uid, []).append((annotationCenter_xyz, annotationDiameter_mm))
 
-    noduleInfo_list = []
+    candidateInfo_list = []
     with open('data/part2/luna/candidates.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
@@ -54,7 +54,7 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
             if series_uid not in dataPresentOnDisk_set and requireDataOnDisk_bool:
                 continue
 
-            isMalignant_bool = bool(int(row[4]))
+            isNodule_bool = bool(int(row[4]))
             candidateCenter_xyz = tuple([float(x) for x in row[1:4]])
 
             candidateDiameter_mm = 0.0
@@ -67,12 +67,12 @@ def getNoduleInfoList(requireDataOnDisk_bool=True):
                     candidateDiameter_mm = annotationDiameter_mm
                     break
 
-            noduleInfo_list.append(NoduleInfoTuple(isMalignant_bool, candidateDiameter_mm, series_uid, candidateCenter_xyz))
+            candidateInfo_list.append(CandidateInfoTuple(isNodule_bool, candidateDiameter_mm, series_uid, candidateCenter_xyz))
 
-    noduleInfo_list.sort(reverse=True)
-    return noduleInfo_list
+    candidateInfo_list.sort(reverse=True)
+    return candidateInfo_list
 
-class Ct(object):
+class Ct:
     def __init__(self, series_uid):
         mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
 
@@ -81,21 +81,19 @@ class Ct(object):
 
         # CTs are natively expressed in https://en.wikipedia.org/wiki/Hounsfield_scale
         # HU are scaled oddly, with 0 g/cc (air, approximately) being -1000 and 1 g/cc (water) being 0.
-        # This gets rid of negative density stuff used to indicate out-of-FOV
-        ct_a[ct_a < -1000] = -1000
-
-        # This nukes any weird hotspots and clamps bone down
-        ct_a[ct_a > 1000] = 1000
+        # The lower bound gets rid of negative density stuff used to indicate out-of-FOV
+        # The upper bound nukes any weird hotspots and clamps bone down
+        ct_a.clip(-1000, 1000, ct_a)
 
         self.series_uid = series_uid
         self.hu_a = ct_a
 
         self.origin_xyz = XyzTuple(*ct_mhd.GetOrigin())
         self.vxSize_xyz = XyzTuple(*ct_mhd.GetSpacing())
-        self.direction_tup = tuple(int(round(x)) for x in ct_mhd.GetDirection())
+        self.direction_a = np.array(ct_mhd.GetDirection()).reshape(3, 3)
 
-    def getRawNodule(self, center_xyz, width_irc):
-        center_irc = xyz2irc(center_xyz, self.origin_xyz, self.vxSize_xyz, self.direction_tup)
+    def getRawCandidate(self, center_xyz, width_irc):
+        center_irc = xyz2irc(center_xyz, self.origin_xyz, self.vxSize_xyz, self.direction_a)
 
         slice_list = []
         for axis, center_val in enumerate(center_irc):
@@ -128,24 +126,24 @@ def getCt(series_uid):
     return Ct(series_uid)
 
 @raw_cache.memoize(typed=True)
-def getCtRawNodule(series_uid, center_xyz, width_irc):
+def getCtRawCandidate(series_uid, center_xyz, width_irc):
     ct = getCt(series_uid)
-    ct_chunk, center_irc = ct.getRawNodule(center_xyz, width_irc)
+    ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
     return ct_chunk, center_irc
 
-def getCtAugmentedNodule(
+def getCtAugmentedCandidate(
         augmentation_dict,
         series_uid, center_xyz, width_irc,
         use_cache=True):
     if use_cache:
-        ct_chunk, center_irc = getCtRawNodule(series_uid, center_xyz, width_irc)
+        ct_chunk, center_irc = getCtRawCandidate(series_uid, center_xyz, width_irc)
     else:
         ct = getCt(series_uid)
-        ct_chunk, center_irc = ct.getRawNodule(center_xyz, width_irc)
+        ct_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
 
     ct_t = torch.tensor(ct_chunk).unsqueeze(0).unsqueeze(0).to(torch.float32)
 
-    transform_t = torch.eye(4).to(torch.float64)
+    transform_t = torch.eye(4)
     # ... <1>
 
     for i in range(3):
@@ -156,7 +154,7 @@ def getCtAugmentedNodule(
         if 'offset' in augmentation_dict:
             offset_float = augmentation_dict['offset']
             random_float = (random.random() * 2 - 1)
-            transform_t[3,i] = offset_float * random_float
+            transform_t[i,3] = offset_float * random_float
 
         if 'scale' in augmentation_dict:
             scale_float = augmentation_dict['scale']
@@ -174,19 +172,21 @@ def getCtAugmentedNodule(
             [s, c, 0, 0],
             [0, 0, 1, 0],
             [0, 0, 0, 1],
-        ], dtype=torch.float64)
+        ])
 
         transform_t @= rotation_t
 
     affine_t = F.affine_grid(
             transform_t[:3].unsqueeze(0).to(torch.float32),
             ct_t.size(),
+            align_corners=False,
         )
 
     augmented_chunk = F.grid_sample(
             ct_t,
             affine_t,
-            padding_mode='border'
+            padding_mode='border',
+            align_corners=False,
         ).to('cpu')
 
     if 'noise' in augmentation_dict:
@@ -206,111 +206,110 @@ class LunaDataset(Dataset):
                  sortby_str='random',
                  ratio_int=0,
                  augmentation_dict=None,
-                 noduleInfo_list=None,
+                 candidateInfo_list=None,
             ):
         self.ratio_int = ratio_int
         self.augmentation_dict = augmentation_dict
 
-        if noduleInfo_list:
-            self.noduleInfo_list = copy.copy(noduleInfo_list)
+        if candidateInfo_list:
+            self.candidateInfo_list = copy.copy(candidateInfo_list)
             self.use_cache = False
         else:
-            self.noduleInfo_list = copy.copy(getNoduleInfoList())
+            self.candidateInfo_list = copy.copy(getCandidateInfoList())
             self.use_cache = True
 
         if series_uid:
-            self.noduleInfo_list = [x for x in self.noduleInfo_list if x.series_uid == series_uid]
+            self.candidateInfo_list = [x for x in self.candidateInfo_list if x.series_uid == series_uid]
 
         if isValSet_bool:
             assert val_stride > 0, val_stride
-            self.noduleInfo_list = self.noduleInfo_list[::val_stride]
-            assert self.noduleInfo_list
+            self.candidateInfo_list = self.candidateInfo_list[::val_stride]
+            assert self.candidateInfo_list
         elif val_stride > 0:
-            del self.noduleInfo_list[::val_stride]
-            assert self.noduleInfo_list
+            del self.candidateInfo_list[::val_stride]
+            assert self.candidateInfo_list
 
         if sortby_str == 'random':
-            random.shuffle(self.noduleInfo_list)
+            random.shuffle(self.candidateInfo_list)
         elif sortby_str == 'series_uid':
-            self.noduleInfo_list.sort(key=lambda x: (x.series_uid, x.center_xyz))
-        elif sortby_str == 'malignancy_size':
+            self.candidateInfo_list.sort(key=lambda x: (x.series_uid, x.center_xyz))
+        elif sortby_str == 'label_and_size':
             pass
         else:
             raise Exception("Unknown sort: " + repr(sortby_str))
 
-        self.benign_list = [nt for nt in self.noduleInfo_list if not nt.isMalignant_bool]
-        self.malignant_list = [nt for nt in self.noduleInfo_list if nt.isMalignant_bool]
+        self.negative_list = [nt for nt in self.candidateInfo_list if not nt.isNodule_bool]
+        self.pos_list = [nt for nt in self.candidateInfo_list if nt.isNodule_bool]
 
-        log.info("{!r}: {} {} samples, {} ben, {} mal, {} ratio".format(
+        log.info("{!r}: {} {} samples, {} neg, {} pos, {} ratio".format(
             self,
-            len(self.noduleInfo_list),
+            len(self.candidateInfo_list),
             "validation" if isValSet_bool else "training",
-            len(self.benign_list),
-            len(self.malignant_list),
+            len(self.negative_list),
+            len(self.pos_list),
             '{}:1'.format(self.ratio_int) if self.ratio_int else 'unbalanced'
         ))
 
     def shuffleSamples(self):
         if self.ratio_int:
-            random.shuffle(self.benign_list)
-            random.shuffle(self.malignant_list)
+            random.shuffle(self.negative_list)
+            random.shuffle(self.pos_list)
 
     def __len__(self):
         if self.ratio_int:
-            return 20000
             return 200000
         else:
-            return len(self.noduleInfo_list) // 20
+            return len(self.candidateInfo_list)
 
     def __getitem__(self, ndx):
         if self.ratio_int:
-            malignant_ndx = ndx // (self.ratio_int + 1)
+            pos_ndx = ndx // (self.ratio_int + 1)
 
             if ndx % (self.ratio_int + 1):
-                benign_ndx = ndx - 1 - malignant_ndx
-                benign_ndx %= len(self.benign_list)
-                nodule_tup = self.benign_list[benign_ndx]
+                neg_ndx = ndx - 1 - pos_ndx
+                neg_ndx %= len(self.negative_list)
+                candidateInfo_tup = self.negative_list[neg_ndx]
             else:
-                malignant_ndx %= len(self.malignant_list)
-                nodule_tup = self.malignant_list[malignant_ndx]
+                pos_ndx %= len(self.pos_list)
+                candidateInfo_tup = self.pos_list[pos_ndx]
         else:
-            nodule_tup = self.noduleInfo_list[ndx]
+            candidateInfo_tup = self.candidateInfo_list[ndx]
 
         width_irc = (32, 48, 48)
 
         if self.augmentation_dict:
-            nodule_t, center_irc = getCtAugmentedNodule(
+            candidate_t, center_irc = getCtAugmentedCandidate(
                 self.augmentation_dict,
-                nodule_tup.series_uid,
-                nodule_tup.center_xyz,
+                candidateInfo_tup.series_uid,
+                candidateInfo_tup.center_xyz,
                 width_irc,
                 self.use_cache,
             )
         elif self.use_cache:
-            nodule_a, center_irc = getCtRawNodule(
-                nodule_tup.series_uid,
-                nodule_tup.center_xyz,
+            candidate_a, center_irc = getCtRawCandidate(
+                candidateInfo_tup.series_uid,
+                candidateInfo_tup.center_xyz,
                 width_irc,
             )
-            nodule_t = torch.from_numpy(nodule_a).to(torch.float32)
-            nodule_t = nodule_t.unsqueeze(0)
+            candidate_t = torch.from_numpy(candidate_a).to(torch.float32)
+            candidate_t = candidate_t.unsqueeze(0)
         else:
-            ct = getCt(nodule_tup.series_uid)
-            nodule_a, center_irc = ct.getRawNodule(
-                nodule_tup.center_xyz,
+            ct = getCt(candidateInfo_tup.series_uid)
+            candidate_a, center_irc = ct.getRawCandidate(
+                candidateInfo_tup.center_xyz,
                 width_irc,
             )
-            nodule_t = torch.from_numpy(nodule_a).to(torch.float32)
-            nodule_t = nodule_t.unsqueeze(0)
+            candidate_t = torch.from_numpy(candidate_a).to(torch.float32)
+            candidate_t = candidate_t.unsqueeze(0)
 
-        malignant_t = torch.tensor([
-                not nodule_tup.isMalignant_bool,
-                nodule_tup.isMalignant_bool
+        pos_t = torch.tensor([
+                not candidateInfo_tup.isNodule_bool,
+                candidateInfo_tup.isNodule_bool
             ],
             dtype=torch.long,
         )
 
-        return nodule_t, malignant_t, nodule_tup.series_uid, torch.tensor(center_irc)
+        return candidate_t, pos_t, candidateInfo_tup.series_uid, torch.tensor(center_irc)
 
 
 

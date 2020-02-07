@@ -19,7 +19,7 @@ log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
 
-class LunaPrepCacheApp(object):
+class LunaPrepCacheApp:
     @classmethod
     def __init__(self, sys_argv=None):
         if sys_argv is None:
