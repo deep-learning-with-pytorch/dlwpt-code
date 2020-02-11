@@ -20,7 +20,7 @@ def augment3d(inp):
             if random.random() > 0.5:
                 transform_t[i,i] *= -1
         if True: #'offset' in augmentation_dict:
-            offset_float = 0.1 # 8 # augmentation_dict['offset']
+            offset_float = 0.1
             random_float = (random.random() * 2 - 1)
             transform_t[3,i] = offset_float * random_float
     if True:

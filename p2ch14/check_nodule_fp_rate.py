@@ -413,13 +413,15 @@ class FalsePosRateCheckApp:
         clean_a = clean_g.cpu().numpy()
         candidateLabel_a, candidate_count = measure.label(clean_a)
         centerIrc_list = measure.center_of_mass(
-            ct.hu_a + 1001,
+            ct.hu_a.clip(-1000, 1000) + 1001,
             labels=candidateLabel_a,
             index=list(range(1, candidate_count+1)),
         )
 
+
         candidateInfo_list = []
         for i, center_irc in enumerate(centerIrc_list):
+            assert np.isfinite(center_irc).all(), repr([series_uid, i, candidate_count, (ct.hu_a[candidateLabel_a == i+1]).sum(), center_irc])
             center_xyz = irc2xyz(
                 center_irc,
                 ct.origin_xyz,

@@ -6,6 +6,7 @@ import shutil
 import sys
 
 import numpy as np
+from matplotlib import pyplot
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -121,11 +122,19 @@ class ClassificationTrainingApp:
 
         if self.cli_args.finetune:
             d = torch.load(self.cli_args.finetune, map_location='cpu')
-            model_blocks = [n for n, subm in model.named_children()
-                            if len(list(subm.parameters())) > 0]
+            model_blocks = [
+                n for n, subm in model.named_children()
+                if len(list(subm.parameters())) > 0
+            ]
             finetune_blocks = model_blocks[-self.cli_args.finetune_depth:]
             log.info(f"finetuning from {self.cli_args.finetune}, blocks {' '.join(finetune_blocks)}")
-            model.load_state_dict(d['model_state'])
+            model.load_state_dict(
+                {
+                    k: v for k,v in d['model_state'].items()
+                    if k.split('.')[0] not in model_blocks[-1]
+                },
+                strict=False,
+            )
             for n, p in model.named_parameters():
                 if n.split('.')[0] not in finetune_blocks:
                     p.requires_grad_(False)
@@ -138,7 +147,7 @@ class ClassificationTrainingApp:
 
     def initOptimizer(self):
         lr = 0.003 if self.cli_args.finetune else 0.001
-        return SGD(self.model.parameters(), weight_decay=1e-4, lr=lr)
+        return SGD(self.model.parameters(), lr=lr, weight_decay=1e-4)
         #return Adam(self.model.parameters(), lr=3e-4)
 
     def initTrainDl(self):
@@ -398,12 +407,21 @@ class ClassificationTrainingApp:
         metrics_dict['pr/f1_score'] = \
             2 * (precision * recall) / (precision + recall)
 
+        threshold = torch.linspace(1, 0)
+        tpr = (metrics_t[None, METRICS_PRED_P_NDX, posLabel_mask] >= threshold[:, None]).sum(1).float() / pos_count
+        fpr = (metrics_t[None, METRICS_PRED_P_NDX, negLabel_mask] >= threshold[:, None]).sum(1).float() / neg_count
+        fp_diff = fpr[1:]-fpr[:-1]
+        tp_avg  = (tpr[1:]+tpr[:-1])/2
+        auc = (fp_diff * tp_avg).sum()
+        metrics_dict['auc'] = auc
+
         log.info(
             ("E{} {:8} {loss/all:.4f} loss, "
                  + "{correct/all:-5.1f}% correct, "
                  + "{pr/precision:.4f} precision, "
                  + "{pr/recall:.4f} recall, "
-                 + "{pr/f1_score:.4f} f1 score"
+                 + "{pr/f1_score:.4f} f1 score, "
+                 + "{auc:.4f} auc"
             ).format(
                 epoch_ndx,
                 mode_str,
@@ -461,6 +479,11 @@ class ClassificationTrainingApp:
             key = key.replace('neg', neg)
             writer.add_scalar(key, value, self.totalTrainingSamples_count)
 
+        fig = pyplot.figure()
+        pyplot.plot(fpr, tpr)
+        writer.add_figure('roc', fig, self.totalTrainingSamples_count)
+
+        writer.add_scalar('auc', auc, self.totalTrainingSamples_count)
 # # tag::logMetrics_writer_prcurve[]
 #        writer.add_pr_curve(
 #            'pr',
@@ -485,7 +508,10 @@ class ClassificationTrainingApp:
             bins=bins
         )
 
-        score = metrics_dict['pr/f1_score']
+        if not self.cli_args.malignant:
+            score = metrics_dict['pr/f1_score']
+        else:
+            score = metrics_dict['auc']
 
         return score
 

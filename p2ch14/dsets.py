@@ -381,12 +381,12 @@ class MalignantLunaDataset(LunaDataset):
 
     def __getitem__(self, ndx):
         if self.ratio_int:
-            if ndx % 4 < 2:
-                candidateInfo_tup = self.mal_list[(ndx // 3) % len(self.mal_list)]
-            elif ndx % 4 == 2:
-                candidateInfo_tup = self.ben_list[(ndx // 3) % len(self.ben_list)]
+            if ndx % 2 != 0:
+                candidateInfo_tup = self.mal_list[(ndx // 2) % len(self.mal_list)]
+            elif ndx % 4 == 0:
+                candidateInfo_tup = self.ben_list[(ndx // 4) % len(self.ben_list)]
             else:
-                candidateInfo_tup = self.neg_list[(ndx // 3) % len(self.neg_list)]
+                candidateInfo_tup = self.neg_list[(ndx // 4) % len(self.neg_list)]
         else:
             if ndx >= len(self.ben_list):
                 candidateInfo_tup = self.mal_list[ndx - len(self.ben_list)]
