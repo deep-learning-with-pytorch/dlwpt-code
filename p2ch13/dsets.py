@@ -33,12 +33,12 @@ MaskTuple = namedtuple('MaskTuple', 'raw_dense_mask, dense_mask, body_mask, air_
 CandidateInfoTuple = namedtuple('CandidateInfoTuple', 'isNodule_bool, hasAnnotation_bool, isMal_bool, diameter_mm, series_uid, center_xyz')
 
 @functools.lru_cache(1)
-def getCandidateInfoList(requireDataOnDisk_bool=True):
+def getCandidateInfoList(requireOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
     mhd_list = glob.glob('data-unversioned/part2/luna/subset*/*.mhd')
-    dataPresentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
+    presentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
     candidateInfo_list = []
     with open('data/part2/luna/annotations_with_malignancy.csv', "r") as f:
@@ -63,7 +63,7 @@ def getCandidateInfoList(requireDataOnDisk_bool=True):
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
 
-            if series_uid not in dataPresentOnDisk_set and requireDataOnDisk_bool:
+            if series_uid not in presentOnDisk_set and requireOnDisk_bool:
                 continue
 
             isNodule_bool = bool(int(row[4]))
@@ -85,18 +85,21 @@ def getCandidateInfoList(requireDataOnDisk_bool=True):
     return candidateInfo_list
 
 @functools.lru_cache(1)
-def getCandidateInfoDict(requireDataOnDisk_bool=True):
-    candidateInfo_list = getCandidateInfoList(requireDataOnDisk_bool)
+def getCandidateInfoDict(requireOnDisk_bool=True):
+    candidateInfo_list = getCandidateInfoList(requireOnDisk_bool)
     candidateInfo_dict = {}
 
     for candidateInfo_tup in candidateInfo_list:
-        candidateInfo_dict.setdefault(candidateInfo_tup.series_uid, []).append(candidateInfo_tup)
+        candidateInfo_dict.setdefault(candidateInfo_tup.series_uid,
+                                      []).append(candidateInfo_tup)
 
     return candidateInfo_dict
 
 class Ct:
     def __init__(self, series_uid):
-        mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
+        mhd_path = glob.glob(
+            'data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid)
+        )[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
         self.hu_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
@@ -117,13 +120,14 @@ class Ct:
             for candidate_tup in candidateInfo_list
             if candidate_tup.isNodule_bool
         ]
-        self.positive_mask, _ = self.buildAnnotationMask(self.positiveInfo_list)
-        self.positive_indexes = sorted(set(self.positive_mask.sum(axis=(1,2)).nonzero()[0]))
+        self.positive_mask = self.buildAnnotationMask(self.positiveInfo_list)
+        self.positive_indexes = (self.positive_mask.sum(axis=(1,2))
+                                 .nonzero()[0].tolist())
 
-    def buildAnnotationMask(self, candidateInfo_list, threshold_hu = -700):
+    def buildAnnotationMask(self, positiveInfo_list, threshold_hu = -700):
         boundingBox_a = np.zeros_like(self.hu_a, dtype=np.bool)
 
-        for candidateInfo_tup in candidateInfo_list:
+        for candidateInfo_tup in positiveInfo_list:
             center_irc = xyz2irc(
                 candidateInfo_tup.center_xyz,
                 self.origin_xyz,
@@ -162,19 +166,18 @@ class Ct:
             # assert row_radius > 0
             # assert col_radius > 0
 
-            slice_tup = (
-                slice(ci - index_radius, ci + index_radius + 1),
-                slice(cr - row_radius, cr + row_radius + 1),
-                slice(cc - col_radius, cc + row_radius + 1),
-            )
-            boundingBox_a[slice_tup] = True
+            boundingBox_a[
+                 ci - index_radius: ci + index_radius + 1,
+                 cr - row_radius: cr + row_radius + 1,
+                 cc - col_radius: cc + col_radius + 1] = True
 
         mask_a = boundingBox_a & (self.hu_a > threshold_hu)
 
-        return mask_a, boundingBox_a
+        return mask_a
 
     def getRawCandidate(self, center_xyz, width_irc):
-        center_irc = xyz2irc(center_xyz, self.origin_xyz, self.vxSize_xyz, self.direction_a)
+        center_irc = xyz2irc(center_xyz, self.origin_xyz, self.vxSize_xyz,
+                             self.direction_a)
 
         slice_list = []
         for axis, center_val in enumerate(center_irc):
@@ -209,7 +212,8 @@ def getCt(series_uid):
 @raw_cache.memoize(typed=True)
 def getCtRawCandidate(series_uid, center_xyz, width_irc):
     ct = getCt(series_uid)
-    ct_chunk, pos_chunk, center_irc = ct.getRawCandidate(center_xyz, width_irc)
+    ct_chunk, pos_chunk, center_irc = ct.getRawCandidate(center_xyz,
+                                                         width_irc)
     ct_chunk.clip(-1000, 1000, ct_chunk)
     return ct_chunk, pos_chunk, center_irc
 
@@ -248,24 +252,20 @@ class Luna2dSegmentationDataset(Dataset):
             index_count, positive_indexes = getCtSampleSize(series_uid)
 
             if self.fullCt_bool:
-                self.sample_list.extend([
-                    (series_uid, slice_ndx)
-                    for slice_ndx
-                    in range(index_count)
-                ])
+                self.sample_list += [(series_uid, slice_ndx)
+                                     for slice_ndx in range(index_count)]
             else:
-                self.sample_list.extend([
-                    (series_uid, slice_ndx)
-                    for slice_ndx
-                    in positive_indexes
-                ])
+                self.sample_list += [(series_uid, slice_ndx)
+                                     for slice_ndx in positive_indexes]
 
         self.candidateInfo_list = getCandidateInfoList()
 
         series_set = set(self.series_list)
-        self.candidateInfo_list = [cit for cit in self.candidateInfo_list if cit.series_uid in series_set]
+        self.candidateInfo_list = [cit for cit in self.candidateInfo_list
+                                   if cit.series_uid in series_set]
 
-        self.pos_list = [nt for nt in self.candidateInfo_list if nt.isNodule_bool]
+        self.pos_list = [nt for nt in self.candidateInfo_list
+                            if nt.isNodule_bool]
 
         log.info("{!r}: {} {} series, {} slices, {} nodules".format(
             self,
@@ -291,7 +291,6 @@ class Luna2dSegmentationDataset(Dataset):
         for i, context_ndx in enumerate(range(start_ndx, end_ndx)):
             context_ndx = max(context_ndx, 0)
             context_ndx = min(context_ndx, ct.hu_a.shape[0] - 1)
-
             ct_t[i] = torch.from_numpy(ct.hu_a[context_ndx].astype(np.float32))
 
         # CTs are natively expressed in https://en.wikipedia.org/wiki/Hounsfield_scale
@@ -332,8 +331,10 @@ class TrainingLuna2dSegmentationDataset(Luna2dSegmentationDataset):
 
         row_offset = random.randrange(0,32)
         col_offset = random.randrange(0,32)
-        ct_t = torch.from_numpy(ct_a[:, row_offset:row_offset+64, col_offset:col_offset+64]).to(torch.float32)
-        pos_t = torch.from_numpy(pos_a[:, row_offset:row_offset+64, col_offset:col_offset+64]).to(torch.long)
+        ct_t = torch.from_numpy(ct_a[:, row_offset:row_offset+64,
+                                     col_offset:col_offset+64]).to(torch.float32)
+        pos_t = torch.from_numpy(pos_a[:, row_offset:row_offset+64,
+                                       col_offset:col_offset+64]).to(torch.long)
 
         slice_ndx = center_irc.index
 

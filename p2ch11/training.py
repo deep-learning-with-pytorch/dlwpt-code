@@ -76,7 +76,7 @@ class LunaTrainingApp:
     def initModel(self):
         model = LunaModel()
         if self.use_cuda:
-            log.info("Using CUDA with {} devices.".format(torch.cuda.device_count()))
+            log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
                 model = nn.DataParallel(model)
             model = model.to(self.device)
@@ -139,8 +139,6 @@ class LunaTrainingApp:
 
         train_dl = self.initTrainDl()
         val_dl = self.initValDl()
-
-        self.initTensorboardWriters()
 
         for epoch_ndx in range(1, self.cli_args.epochs + 1):
 
@@ -283,10 +281,10 @@ class LunaTrainingApp:
         metrics_dict['loss/pos'] = \
             metrics_t[METRICS_LOSS_NDX, posLabel_mask].mean()
 
-        metrics_dict['correct/all'] = \
-            (pos_correct + neg_correct) / np.float32(metrics_t.shape[1]) * 100
-        metrics_dict['correct/neg'] = (neg_correct) / np.float32(neg_count) * 100
-        metrics_dict['correct/pos'] = (pos_correct) / np.float32(pos_count) * 100
+        metrics_dict['correct/all'] = (pos_correct + neg_correct) \
+            / np.float32(metrics_t.shape[1]) * 100
+        metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100
+        metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100
 
         log.info(
             ("E{} {:8} {loss/all:.4f} loss, "

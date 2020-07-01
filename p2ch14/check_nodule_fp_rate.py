@@ -418,7 +418,6 @@ class FalsePosRateCheckApp:
             index=list(range(1, candidate_count+1)),
         )
 
-
         candidateInfo_list = []
         for i, center_irc in enumerate(centerIrc_list):
             assert np.isfinite(center_irc).all(), repr([series_uid, i, candidate_count, (ct.hu_a[candidateLabel_a == i+1]).sum(), center_irc])

@@ -211,7 +211,16 @@ class NoduleAnalysisApp:
         log.debug(self.cli_args.segmentation_path)
         seg_dict = torch.load(self.cli_args.segmentation_path)
 
-        seg_model = UNetWrapper(in_channels=7, n_classes=1, depth=3, wf=4, padding=True, batch_norm=True, up_mode='upconv')
+        seg_model = UNetWrapper(
+            in_channels=7,
+            n_classes=1,
+            depth=3,
+            wf=4,
+            padding=True,
+            batch_norm=True,
+            up_mode='upconv',
+        )
+
         seg_model.load_state_dict(seg_dict['model_state'])
         seg_model.eval()
 
@@ -299,7 +308,10 @@ class NoduleAnalysisApp:
                 for candidateInfo_tup in getCandidateInfoList()
             )
 
-        train_list = sorted(series_set - val_set) if self.cli_args.include_train else []
+        if self.cli_args.include_train:
+            train_list = sorted(series_set - val_set)
+        else:
+            train_list = []
         val_list = sorted(series_set & val_set)
 
 
@@ -314,9 +326,9 @@ class NoduleAnalysisApp:
             mask_a = self.segmentCt(ct, series_uid)
 
             candidateInfo_list = self.groupSegmentationOutput(
-                series_uid, ct, mask_a
-            )
-            classifications_list = self.classifyCandidates(ct, candidateInfo_list)
+                series_uid, ct, mask_a)
+            classifications_list = self.classifyCandidates(
+                ct, candidateInfo_list)
 
             if not self.cli_args.run_validation:
                 print(f"found nodule candidates in {series_uid}:")
@@ -329,11 +341,17 @@ class NoduleAnalysisApp:
                         print(s)
 
             if series_uid in candidateInfo_dict:
-                one_confusion = match_and_score(classifications_list, candidateInfo_dict[series_uid])
+                one_confusion = match_and_score(
+                    classifications_list, candidateInfo_dict[series_uid]
+                )
                 all_confusion += one_confusion
-                print_confusion(series_uid, one_confusion, self.malignancy_model is not None)
+                print_confusion(
+                    series_uid, one_confusion, self.malignancy_model is not None
+                )
 
-        print_confusion("Total", all_confusion, self.malignancy_model is not None)
+        print_confusion(
+            "Total", all_confusion, self.malignancy_model is not None
+        )
 
 
     def classifyCandidates(self, ct, candidateInfo_list):
@@ -350,14 +368,11 @@ class NoduleAnalysisApp:
                 else:
                     probability_mal_g = torch.zeros_like(probability_nodule_g)
 
-            zip_iter = zip(
-                center_list,
+            zip_iter = zip(center_list,
                 probability_nodule_g[:,1].tolist(),
-                probability_mal_g[:,1].tolist(),
-            )
+                probability_mal_g[:,1].tolist())
             for center_irc, prob_nodule, prob_mal in zip_iter:
-                center_xyz = irc2xyz(
-                    center_irc,
+                center_xyz = irc2xyz(center_irc,
                     direction_a=ct.direction_a,
                     origin_xyz=ct.origin_xyz,
                     vxSize_xyz=ct.vxSize_xyz,
@@ -369,9 +384,8 @@ class NoduleAnalysisApp:
     def segmentCt(self, ct, series_uid):
         with torch.no_grad():
             output_a = np.zeros_like(ct.hu_a, dtype=np.float32)
-            seg_dl = self.initSegmentationDl(series_uid)
-            for batch_tup in seg_dl:
-                input_t, label_t, series_list, slice_ndx_list = batch_tup
+            seg_dl = self.initSegmentationDl(series_uid)  #  <3>
+            for input_t, _, _, slice_ndx_list in seg_dl:
 
                 input_g = input_t.to(self.device)
                 prediction_g = self.seg_model(input_g)

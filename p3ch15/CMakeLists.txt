@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 project(cyclegan-jit)
 
 find_package(Torch REQUIRED)
+
+# Explicitly dealing with OpenMP seems to be needed with some C++
+# nightlies in March 2020. Probably a bug.
+find_package(OpenMP)
+if(OPENMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
 add_executable(cyclegan-jit cyclegan_jit.cpp)

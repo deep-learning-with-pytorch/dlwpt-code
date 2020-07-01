@@ -10,7 +10,8 @@ from p2ch13.model_cls import LunaModel
 app = Flask(__name__)
 
 model = LunaModel()
-model.load_state_dict(torch.load(sys.argv[1], map_location='cpu')['model_state'])
+model.load_state_dict(torch.load(sys.argv[1],
+                                 map_location='cpu')['model_state'])
 model.eval()
 
 def run_inference(in_tensor):
@@ -25,7 +26,8 @@ def run_inference(in_tensor):
 def predict():
     meta = json.load(request.files['meta'])
     blob = request.files['blob'].read()
-    in_tensor = torch.from_numpy(np.frombuffer(blob, dtype=np.float32))
+    in_tensor = torch.from_numpy(np.frombuffer(
+        blob, dtype=np.float32))
     in_tensor = in_tensor.view(*meta['shape'])
     out = run_inference(in_tensor)
     return jsonify(out)

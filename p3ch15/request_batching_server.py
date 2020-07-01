@@ -33,9 +33,14 @@ class ModelRunner:
     def __init__(self, model_name):
         self.model_name = model_name
         self.queue = []
+
         self.queue_lock = None
-        self.model = get_pretrained_model(self.model_name, map_location=device)
+
+        self.model = get_pretrained_model(self.model_name,
+                                          map_location=device)
+
         self.needs_processing = None
+
         self.needs_processing_timer = None
 
     def schedule_processing_if_needed(self):
@@ -56,6 +61,7 @@ class ModelRunner:
             self.queue.append(our_task)
             logger.debug("enqueued task. new queue size {}".format(len(self.queue)))
             self.schedule_processing_if_needed()
+
         await our_task["done_event"].wait()
         return our_task["output"]
 
@@ -85,7 +91,9 @@ class ModelRunner:
             batch = torch.stack([t["input"] for t in to_process], dim=0)
             # we could delete inputs here...
 
-            result = await app.loop.run_in_executor(None, functools.partial(self.run_model, batch))
+            result = await app.loop.run_in_executor(
+                None, functools.partial(self.run_model, batch)
+            )
             for t, r in zip(to_process, result):
                 t["output"] = r
                 t["done_event"].set()

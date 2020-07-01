@@ -27,16 +27,22 @@ log.setLevel(logging.DEBUG)
 
 raw_cache = getCache('part2ch14_raw')
 
-CandidateInfoTuple = namedtuple('CandidateInfoTuple', 'isNodule_bool, hasAnnotation_bool, isMal_bool, diameter_mm, series_uid, center_xyz')
-MaskTuple = namedtuple('MaskTuple', 'raw_dense_mask, dense_mask, body_mask, air_mask, raw_candidate_mask, candidate_mask, lung_mask, neg_mask, pos_mask')
+CandidateInfoTuple = namedtuple(
+    'CandidateInfoTuple',
+    'isNodule_bool, hasAnnotation_bool, isMal_bool, diameter_mm, series_uid, center_xyz',
+)
+MaskTuple = namedtuple(
+    'MaskTuple',
+    'raw_dense_mask, dense_mask, body_mask, air_mask, raw_candidate_mask, candidate_mask, lung_mask, neg_mask, pos_mask',
+)
 
 @functools.lru_cache(1)
-def getCandidateInfoList(requireDataOnDisk_bool=True):
+def getCandidateInfoList(requireOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
     mhd_list = glob.glob('data-unversioned/part2/luna/subset*/*.mhd')
-    dataPresentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
+    presentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
     candidateInfo_list = []
     with open('data/part2/luna/annotations_with_malignancy.csv', "r") as f:
@@ -52,21 +58,28 @@ def getCandidateInfoList(requireDataOnDisk_bool=True):
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
 
-            if series_uid not in dataPresentOnDisk_set and requireDataOnDisk_bool:
+            if series_uid not in presentOnDisk_set and requireOnDisk_bool:
                 continue
 
             isNodule_bool = bool(int(row[4]))
             candidateCenter_xyz = tuple([float(x) for x in row[1:4]])
 
             if not isNodule_bool:
-                candidateInfo_list.append(CandidateInfoTuple(False, False, False, 0.0, series_uid, candidateCenter_xyz))
+                candidateInfo_list.append(CandidateInfoTuple(
+                    False,
+                    False,
+                    False,
+                    0.0,
+                    series_uid,
+                    candidateCenter_xyz,
+                ))
 
     candidateInfo_list.sort(reverse=True)
     return candidateInfo_list
 
 @functools.lru_cache(1)
-def getCandidateInfoDict(requireDataOnDisk_bool=True):
-    candidateInfo_list = getCandidateInfoList(requireDataOnDisk_bool)
+def getCandidateInfoDict(requireOnDisk_bool=True):
+    candidateInfo_list = getCandidateInfoList(requireOnDisk_bool)
     candidateInfo_dict = {}
 
     for candidateInfo_tup in candidateInfo_list:
@@ -77,7 +90,9 @@ def getCandidateInfoDict(requireDataOnDisk_bool=True):
 
 class Ct:
     def __init__(self, series_uid):
-        mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
+        mhd_path = glob.glob(
+            'data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid)
+        )[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
         ct_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
@@ -251,10 +266,14 @@ class LunaDataset(Dataset):
         else:
             raise Exception("Unknown sort: " + repr(sortby_str))
 
-        self.neg_list = [nt for nt in self.candidateInfo_list if not nt.isNodule_bool]
-        self.pos_list = [nt for nt in self.candidateInfo_list if nt.isNodule_bool]
-        self.ben_list = [nt for nt in self.pos_list if not nt.isMal_bool]
-        self.mal_list = [nt for nt in self.pos_list if nt.isMal_bool]
+        self.neg_list = \
+            [nt for nt in self.candidateInfo_list if not nt.isNodule_bool]
+        self.pos_list = \
+            [nt for nt in self.candidateInfo_list if nt.isNodule_bool]
+        self.ben_list = \
+            [nt for nt in self.pos_list if not nt.isMal_bool]
+        self.mal_list = \
+            [nt for nt in self.pos_list if nt.isMal_bool]
 
         log.info("{!r}: {} {} samples, {} neg, {} pos, {} ratio".format(
             self,
@@ -276,8 +295,6 @@ class LunaDataset(Dataset):
     def __len__(self):
         if self.ratio_int:
             return 50000
-            # return 50000
-            # return 200000
         else:
             return len(self.candidateInfo_list)
 
@@ -295,7 +312,9 @@ class LunaDataset(Dataset):
         else:
             candidateInfo_tup = self.candidateInfo_list[ndx]
 
-        return self.sampleFromCandidateInfo_tup(candidateInfo_tup, candidateInfo_tup.isNodule_bool)
+        return self.sampleFromCandidateInfo_tup(
+            candidateInfo_tup, candidateInfo_tup.isNodule_bool
+        )
 
     def sampleFromCandidateInfo_tup(self, candidateInfo_tup, label_bool):
         width_irc = (32, 48, 48)
@@ -337,45 +356,10 @@ class LunaDataset(Dataset):
         return candidate_t, label_t, index_t, candidateInfo_tup.series_uid, torch.tensor(center_irc)
 
 
-# class MalignantLunaDataset(LunaDataset):
-# # tag::ds_balancing_len[]
-#     def __len__(self):
-#         if self.ratio_int:
-#             return 10000
-#             # return 50000
-#             # return 200000
-#         else:
-#             return len(self.ben_list + self.mal_list)
-# # end::ds_balancing_len[]
-#
-# # tag::ds_balancing_getitem[]
-#     def __getitem__(self, ndx):
-#         if self.ratio_int:
-#             mal_ndx = ndx // (self.ratio_int + 1)
-#
-#             if ndx % (self.ratio_int + 1):
-#                 ben_ndx = ndx - 1 - mal_ndx
-#                 ben_ndx %= len(self.ben_list)
-#                 candidateInfo_tup = self.ben_list[ben_ndx]
-#             else:
-#                 mal_ndx %= len(self.mal_list)
-#                 candidateInfo_tup = self.mal_list[mal_ndx]
-#         else:
-#             if ndx >= len(self.ben_list):
-#                 candidateInfo_tup = self.mal_list[ndx - len(self.ben_list)]
-#             else:
-#                 candidateInfo_tup = self.ben_list[ndx]
-#
-#         return self.sampleFromCandidateInfo_tup(candidateInfo_tup, candidateInfo_tup.isMal_bool)
-# # end::ds_balancing_getitem[]
-
 class MalignantLunaDataset(LunaDataset):
     def __len__(self):
         if self.ratio_int:
-            # return 10000
             return 100000
-            # return 50000
-            # return 200000
         else:
             return len(self.ben_list + self.mal_list)
 
@@ -393,4 +377,6 @@ class MalignantLunaDataset(LunaDataset):
             else:
                 candidateInfo_tup = self.ben_list[ndx]
 
-        return self.sampleFromCandidateInfo_tup(candidateInfo_tup, candidateInfo_tup.isMal_bool)
+        return self.sampleFromCandidateInfo_tup(
+            candidateInfo_tup, candidateInfo_tup.isMal_bool
+        )

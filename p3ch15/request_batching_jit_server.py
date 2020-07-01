@@ -84,7 +84,9 @@ class ModelRunner:
             batch = torch.stack([t["input"] for t in to_process], dim=0)
             # we could delete inputs here...
 
-            result = await app.loop.run_in_executor(None, functools.partial(self.run_model, batch))
+            result = await app.loop.run_in_executor(
+                None, functools.partial(self.run_model, batch)
+            )
             for t, r in zip(to_process, result):
                 t["output"] = r
                 t["done_event"].set()

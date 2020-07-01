@@ -25,15 +25,18 @@ log.setLevel(logging.DEBUG)
 
 raw_cache = getCache('part2ch11_raw')
 
-CandidateInfoTuple = namedtuple('CandidateInfoTuple', 'isNodule_bool, diameter_mm, series_uid, center_xyz')
+CandidateInfoTuple = namedtuple(
+    'CandidateInfoTuple',
+    'isNodule_bool, diameter_mm, series_uid, center_xyz',
+)
 
 @functools.lru_cache(1)
-def getCandidateInfoList(requireDataOnDisk_bool=True):
+def getCandidateInfoList(requireOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
     mhd_list = glob.glob('data-unversioned/part2/luna/subset*/*.mhd')
-    dataPresentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
+    presentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
     diameter_dict = {}
     with open('data/part2/luna/annotations.csv', "r") as f:
@@ -42,21 +45,24 @@ def getCandidateInfoList(requireDataOnDisk_bool=True):
             annotationCenter_xyz = tuple([float(x) for x in row[1:4]])
             annotationDiameter_mm = float(row[4])
 
-            diameter_dict.setdefault(series_uid, []).append((annotationCenter_xyz, annotationDiameter_mm))
+            diameter_dict.setdefault(series_uid, []).append(
+                (annotationCenter_xyz, annotationDiameter_mm),
+            )
 
     candidateInfo_list = []
     with open('data/part2/luna/candidates.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
 
-            if series_uid not in dataPresentOnDisk_set and requireDataOnDisk_bool:
+            if series_uid not in presentOnDisk_set and requireOnDisk_bool:
                 continue
 
             isNodule_bool = bool(int(row[4]))
             candidateCenter_xyz = tuple([float(x) for x in row[1:4]])
 
             candidateDiameter_mm = 0.0
-            for annotationCenter_xyz, annotationDiameter_mm in diameter_dict.get(series_uid, []):
+            for annotation_tup in diameter_dict.get(series_uid, []):
+                annotationCenter_xyz, annotationDiameter_mm = annotation_tup
                 for i in range(3):
                     delta_mm = abs(candidateCenter_xyz[i] - annotationCenter_xyz[i])
                     if delta_mm > annotationDiameter_mm / 4:
@@ -65,14 +71,21 @@ def getCandidateInfoList(requireDataOnDisk_bool=True):
                     candidateDiameter_mm = annotationDiameter_mm
                     break
 
-            candidateInfo_list.append(CandidateInfoTuple(isNodule_bool, candidateDiameter_mm, series_uid, candidateCenter_xyz))
+            candidateInfo_list.append(CandidateInfoTuple(
+                isNodule_bool,
+                candidateDiameter_mm,
+                series_uid,
+                candidateCenter_xyz,
+            ))
 
     candidateInfo_list.sort(reverse=True)
     return candidateInfo_list
 
 class Ct:
     def __init__(self, series_uid):
-        mhd_path = glob.glob('data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid))[0]
+        mhd_path = glob.glob(
+            'data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid)
+        )[0]
 
         ct_mhd = sitk.ReadImage(mhd_path)
         ct_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
@@ -91,7 +104,12 @@ class Ct:
         self.direction_a = np.array(ct_mhd.GetDirection()).reshape(3, 3)
 
     def getRawCandidate(self, center_xyz, width_irc):
-        center_irc = xyz2irc(center_xyz, self.origin_xyz, self.vxSize_xyz, self.direction_a)
+        center_irc = xyz2irc(
+            center_xyz,
+            self.origin_xyz,
+            self.vxSize_xyz,
+            self.direction_a,
+        )
 
         slice_list = []
         for axis, center_val in enumerate(center_irc):
@@ -140,7 +158,9 @@ class LunaDataset(Dataset):
         self.candidateInfo_list = copy.copy(getCandidateInfoList())
 
         if series_uid:
-            self.candidateInfo_list = [x for x in self.candidateInfo_list if x.series_uid == series_uid]
+            self.candidateInfo_list = [
+                x for x in self.candidateInfo_list if x.series_uid == series_uid
+            ]
 
         if isValSet_bool:
             assert val_stride > 0, val_stride

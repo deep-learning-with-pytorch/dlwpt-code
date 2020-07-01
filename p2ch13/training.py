@@ -144,7 +144,7 @@ class SegmentationTrainingApp:
         augmentation_model = SegmentationAugmentation(**self.augmentation_dict)
 
         if self.use_cuda:
-            log.info("Using CUDA with {} devices.".format(torch.cuda.device_count()))
+            log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
                 segmentation_model = nn.DataParallel(segmentation_model)
                 augmentation_model = nn.DataParallel(augmentation_model)
@@ -229,6 +229,7 @@ class SegmentationTrainingApp:
             self.logMetrics(epoch_ndx, 'trn', trnMetrics_t)
 
             if epoch_ndx == 1 or epoch_ndx % self.validation_cadence == 0:
+                # if validation is wanted
                 valMetrics_t = self.doValidation(epoch_ndx, val_dl)
                 score = self.logMetrics(epoch_ndx, 'val', valMetrics_t)
                 best_score = max(score, best_score)
@@ -278,7 +279,8 @@ class SegmentationTrainingApp:
 
         return valMetrics_g.to('cpu')
 
-    def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics_g, classificationThreshold=0.5):
+    def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics_g,
+                         classificationThreshold=0.5):
         input_t, label_t, series_list, _slice_ndx_list = batch_tup
 
         input_g = input_t.to(self.device, non_blocking=True)
@@ -296,30 +298,21 @@ class SegmentationTrainingApp:
         end_ndx = start_ndx + input_t.size(0)
 
         with torch.no_grad():
-            predictionBool_g = \
-                (prediction_g[:, 0:1] > classificationThreshold).to(torch.float32)
+            predictionBool_g = (prediction_g[:, 0:1]
+                                > classificationThreshold).to(torch.float32)
 
-            # metrics_g[METRICS_LABEL_NDX, start_ndx:end_ndx] = label_list
+            tp = (     predictionBool_g *  label_g).sum(dim=[1,2,3])
+            fn = ((1 - predictionBool_g) *  label_g).sum(dim=[1,2,3])
+            fp = (     predictionBool_g * (~label_g)).sum(dim=[1,2,3])
+
             metrics_g[METRICS_LOSS_NDX, start_ndx:end_ndx] = diceLoss_g
-            # metrics_g[METRICS_FN_LOSS_NDX, start_ndx:end_ndx] = fnLoss_g
-
-            intersectionSum = lambda a, b: (a * b).sum(dim=[1,2,3])
-
-            tp = intersectionSum(    predictionBool_g,  label_g)
-            fn = intersectionSum(1 - predictionBool_g,  label_g)
-            fp = intersectionSum(    predictionBool_g, ~label_g)
-
             metrics_g[METRICS_TP_NDX, start_ndx:end_ndx] = tp
             metrics_g[METRICS_FN_NDX, start_ndx:end_ndx] = fn
             metrics_g[METRICS_FP_NDX, start_ndx:end_ndx] = fp
 
-            del tp, fn, fp
+        return diceLoss_g.mean() + fnLoss_g.mean() * 8
 
-        return diceLoss_g.mean() + fnLoss_g.mean() * 2**3# / 2**1
-
-    def diceLoss(self, prediction_g, label_g, epsilon=1, p=False):
-        # log.debug([prediction_g.shape, label_g.shape])
-
+    def diceLoss(self, prediction_g, label_g, epsilon=1):
         diceLabel_g = label_g.sum(dim=[1,2,3])
         dicePrediction_g = prediction_g.sum(dim=[1,2,3])
         diceCorrect_g = (prediction_g * label_g).sum(dim=[1,2,3])
@@ -333,13 +326,12 @@ class SegmentationTrainingApp:
     def logImages(self, epoch_ndx, mode_str, dl):
         self.segmentation_model.eval()
 
-        images_iter = sorted(dl.dataset.series_list)[:12]
-        for series_ndx, series_uid in enumerate(images_iter):
+        images = sorted(dl.dataset.series_list)[:12]
+        for series_ndx, series_uid in enumerate(images):
             ct = getCt(series_uid)
 
             for slice_ndx in range(6):
-                ct_ndx = slice_ndx * ct.hu_a.shape[0] // 5
-                ct_ndx = min(ct_ndx, ct.hu_a.shape[0] - 1)
+                ct_ndx = slice_ndx * (ct.hu_a.shape[0] - 1) // 5
                 sample_tup = dl.dataset.getitem_fullSlice(series_uid, ct_ndx)
 
                 ct_t, label_t, series_uid, ct_ndx = sample_tup
@@ -351,9 +343,8 @@ class SegmentationTrainingApp:
                 prediction_a = prediction_g.to('cpu').detach().numpy()[0] > 0.5
                 label_a = label_g.cpu().numpy()[0][0] > 0.5
 
-                ct_t[:-1,:,:] /= 1000
-                ct_t[:-1,:,:] += 1
-                ct_t[:-1,:,:] /= 2
+                ct_t[:-1,:,:] /= 2000
+                ct_t[:-1,:,:] += 0.5
 
                 ctSlice_a = ct_t[dl.dataset.contextSlices_count].numpy()
 
@@ -369,11 +360,7 @@ class SegmentationTrainingApp:
 
                 writer = getattr(self, mode_str + '_writer')
                 writer.add_image(
-                    '{}/{}_prediction_{}'.format(
-                        mode_str,
-                        series_ndx,
-                        slice_ndx,
-                    ),
+                    f'{mode_str}/{series_ndx}_prediction_{slice_ndx}',
                     image_a,
                     self.totalTrainingSamples_count,
                     dataformats='HWC',
@@ -399,13 +386,11 @@ class SegmentationTrainingApp:
                         self.totalTrainingSamples_count,
                         dataformats='HWC',
                     )
+                # This flush prevents TB from getting confused about which
+                # data item belongs where.
                 writer.flush()
 
-    def logMetrics(self,
-        epoch_ndx,
-        mode_str,
-        metrics_t,
-    ):
+    def logMetrics(self, epoch_ndx, mode_str, metrics_t):
         log.info("E{} {}".format(
             epoch_ndx,
             type(self).__name__,
@@ -528,17 +513,9 @@ class SegmentationTrainingApp:
 
         if isBest:
             best_path = os.path.join(
-                'data-unversioned',
-                'part2',
-                'models',
+                'data-unversioned', 'part2', 'models',
                 self.cli_args.tb_prefix,
-                '{}_{}_{}.{}.state'.format(
-                    type_str,
-                    self.time_str,
-                    self.cli_args.comment,
-                    'best',
-                )
-            )
+                f'{type_str}_{self.time_str}_{self.cli_args.comment}.best.state')
             shutil.copyfile(file_path, best_path)
 
             log.info("Saved model params to {}".format(best_path))

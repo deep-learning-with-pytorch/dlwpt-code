@@ -34,9 +34,12 @@ class UNetWrapper(nn.Module):
         }
         for m in self.modules():
             if type(m) in init_set:
-                nn.init.kaiming_normal_(m.weight.data, mode='fan_out', nonlinearity='relu', a=0)
+                nn.init.kaiming_normal_(
+                    m.weight.data, mode='fan_out', nonlinearity='relu', a=0
+                )
                 if m.bias is not None:
-                    fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(m.weight.data)
+                    fan_in, fan_out = \
+                        nn.init._calculate_fan_in_and_fan_out(m.weight.data)
                     bound = 1 / math.sqrt(fan_out)
                     nn.init.normal_(m.bias, -bound, bound)
 
@@ -48,11 +51,12 @@ class UNetWrapper(nn.Module):
         bn_output = self.input_batchnorm(input_batch)
         un_output = self.unet(bn_output)
         fn_output = self.final(un_output)
-
         return fn_output
 
 class SegmentationAugmentation(nn.Module):
-    def __init__(self, flip=None, offset=None, scale=None, rotate=None, noise=None):
+    def __init__(
+            self, flip=None, offset=None, scale=None, rotate=None, noise=None
+    ):
         super().__init__()
 
         self.flip = flip
@@ -63,29 +67,17 @@ class SegmentationAugmentation(nn.Module):
 
     def forward(self, input_g, label_g):
         transform_t = self._build2dTransformMatrix()
-
-        # log.debug([input_g.shape, label_g.shape])
-
         transform_t = transform_t.expand(input_g.shape[0], -1, -1)
         transform_t = transform_t.to(input_g.device, torch.float32)
-        affine_t = F.affine_grid(
-                transform_t[:,:2],
-                input_g.size(),
-                align_corners=False,
-            )
+        affine_t = F.affine_grid(transform_t[:,:2],
+                input_g.size(), align_corners=False)
 
-        augmented_input_g = F.grid_sample(
-                input_g,
-                affine_t,
-                padding_mode='border',
-                align_corners=False,
-            )
-        augmented_label_g = F.grid_sample(
-                label_g.to(torch.float32),
-                affine_t,
-                padding_mode='border',
-                align_corners=False,
-            )
+        augmented_input_g = F.grid_sample(input_g,
+                affine_t, padding_mode='border',
+                align_corners=False)
+        augmented_label_g = F.grid_sample(label_g.to(torch.float32),
+                affine_t, padding_mode='border',
+                align_corners=False)
 
         if self.noise:
             noise_t = torch.randn_like(augmented_input_g)
@@ -96,7 +88,7 @@ class SegmentationAugmentation(nn.Module):
         return augmented_input_g, augmented_label_g > 0.5
 
     def _build2dTransformMatrix(self):
-        transform_t = torch.eye(3).to(torch.float64)
+        transform_t = torch.eye(3)
 
         for i in range(2):
             if self.flip:
@@ -121,8 +113,7 @@ class SegmentationAugmentation(nn.Module):
             rotation_t = torch.tensor([
                 [c, -s, 0],
                 [s, c, 0],
-                [0, 0, 1],
-            ], dtype=torch.float64)
+                [0, 0, 1]])
 
             transform_t @= rotation_t
 

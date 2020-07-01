@@ -124,7 +124,7 @@ class LunaTrainingApp:
     def initModel(self):
         model = LunaModel()
         if self.use_cuda:
-            log.info("Using CUDA with {} devices.".format(torch.cuda.device_count()))
+            log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
                 model = nn.DataParallel(model)
             model = model.to(self.device)
