@@ -8,6 +8,8 @@ The Manning site for the book is: https://www.manning.com/books/deep-learning-wi
 
 The book can also be purchased on Amazon: https://amzn.to/38Iwrff (affiliate link)
 
+The errata for the book can be found on the manning website, or at https://deep-learning-with-pytorch.github.io/dlwpt-code/errata.html
+
 ## About Deep Learning with PyTorch
 
 This book has the aim of providing the foundations of deep learning with PyTorch and
