@@ -21,6 +21,8 @@ scikit-image>=0.15.0
 scipy
 SimpleITK
 tensorflow>=1.14,<2
+
+# The book was written targeting PyTorch 1.4, but everything in it should work fine with more up-to-date versions.
 torch==1.4
 
 # future is here due to a missing dep in caffe2
