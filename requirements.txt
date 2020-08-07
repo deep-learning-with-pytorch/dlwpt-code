@@ -1,0 +1,27 @@
+# On Ubuntu, install the following packages:
+# - python3
+# - python3-venv
+#
+# And then the virtual environment can be created by running:
+#
+# python3 -m venv .venv
+# .venv/bin/pip install --upgrade pip
+# .venv/bin/pip install -r requirements.txt
+#
+# Then use .venv/bin/python to run the various training scripts.
+
+blosc>=1.8.1,<2
+diskcache==4.1.0
+h5py
+jupyter
+matplotlib
+numpy<=1.16.4
+Pillow
+scikit-image>=0.15.0
+scipy
+SimpleITK
+tensorflow>=1.14,<2
+torch==1.4
+
+# future is here due to a missing dep in caffe2
+# future
