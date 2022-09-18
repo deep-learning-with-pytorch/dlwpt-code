@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>neuraltalk2 results visualization</title>
+    <script src="jquery-1.8.3.min.js"></script>
+    <style>
+    body {
+      background: #000;
+      margin: 0;
+      font-family: "HelveticaNeue-Light", "Helvetica Neue Light", "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif; 
+      font-weight: 200;
+    }
+    .result {
+      background: no-repeat center/contain #141414;
+      color: #fff;
+      height: 18vw;
+      position: relative;
+      width: 32vw;
+      display: inline-block;
+    }
+    .result:nth-child(2n+1) {
+      background-color: #181818;
+    }
+    .result p {
+      background: rgba(0, 0, 0, .5);
+      bottom: 0;
+      box-sizing: border-box;
+      left: 0;
+      margin: 0;
+      padding: 5px;
+      position: absolute;
+      text-shadow: 0 1px 1px #000;
+      width: 100%;
+    }
+    #results {
+      margin: 1.5vw auto;
+      width: 96vw;
+    }
+    </style>
+  </head>
+  <body>
+    <div id="results"></div>
+    <script>
+    function loadVisible() {
+      var top = $(document).scrollTop(), bottom = top + $(window).height();
+      var results = $('#results > div')
+      for (var i = 0; i < results.length; i++) {
+        var div = results.eq(i);
+        var y1 = div.position().top, y2 = y1 + div.height();
+        if (y1 > bottom || y2 < top) {
+          div.css('background-image', '');
+          continue;
+        }
+        div.css('background-image', 'url(' + div.data('image') + ')');
+      }
+    }
+    $(window).scroll(loadVisible);
+    $.getJSON('vis.json?t=' + +new Date, function (data) {
+      $('#results').html('');
+      for (var i = 0; i < data.length; i++) {
+        var path = 'imgs/img' + (i + 1) + '.jpg';
+        $('<div class="result">')
+          .data('image', path)
+          .append($('<p>').text(data[i].caption))
+          .appendTo('#results');
+      }
+      loadVisible();
+    });
+    </script>
+  </body>
+</html>
