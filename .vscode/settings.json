@@ -7,5 +7,6 @@
     },
     "javascript.suggest.includeAutomaticOptionalChainCompletions": false,
     "debug.saveBeforeStart": "none",
-    "vscode-as-git-mergetool.settingsAssistantOnStartup": false
+    "vscode-as-git-mergetool.settingsAssistantOnStartup": false,
+    "c3.welcome.showFeatureHighlight": false
 }
