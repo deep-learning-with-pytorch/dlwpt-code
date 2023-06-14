@@ -9,5 +9,6 @@
     "debug.saveBeforeStart": "none",
     "vscode-as-git-mergetool.settingsAssistantOnStartup": false,
     "c3.welcome.showFeatureHighlight": false,
-    "git-blame.gitWebUrl": ""
+    "git-blame.gitWebUrl": "",
+    "workbench.view.alwaysShowHeaderActions": true
 }
