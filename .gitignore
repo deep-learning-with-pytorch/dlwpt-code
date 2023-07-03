@@ -1,3 +1,6 @@
 .DS_Store
 tools
 *_old
+
+.fake
+Copilot/

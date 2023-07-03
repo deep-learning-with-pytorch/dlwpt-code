@@ -4,9 +4,9 @@
 #
 # And then the virtual environment can be created by running:
 #
-# python3 -m venv .venv
-# .venv/bin/pip install --upgrade pip
-# .venv/bin/pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
 #
 # Then use .venv/bin/python to run the various training scripts.
 
