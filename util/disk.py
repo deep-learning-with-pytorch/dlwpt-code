@@ -1,9 +1,15 @@
+from util.logconf import logging
+import io
 import gzip
 
 from diskcache import FanoutCache, Disk
-from diskcache.core import BytesType, MODE_BINARY, BytesIO
+# delete BytesType and BytesIO declarations
+from diskcache.core import MODE_BINARY
 
-from util.logconf import logging
+BytesType = bytes  # Import them by ourselves
+BytesIO = io.BytesIO
+
+
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
