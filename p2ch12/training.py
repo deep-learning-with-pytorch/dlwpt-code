@@ -10,10 +10,10 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 from torch.optim import SGD
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from util.util import enumerateWithEstimate
-from .dsets import LunaDataset
+from .dsets import LunaDataset, getCandidateInfoList
 from util.logconf import logging
 from .model import LunaModel
 
@@ -113,6 +113,11 @@ class LunaTrainingApp:
             self.augmentation_dict['rotate'] = True
         if self.cli_args.augmented or self.cli_args.augment_noise:
             self.augmentation_dict['noise'] = 25.0
+        
+        self.sortby_str = 'random'
+        if not self.cli_args.balanced:
+            self.sortby_str = 'label_and_size'
+        
 
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
@@ -138,10 +143,22 @@ class LunaTrainingApp:
         train_ds = LunaDataset(
             val_stride=10,
             isValSet_bool=False,
-            ratio_int=int(self.cli_args.balanced),
+            ratio_int=int(self.cli_args.balanced), #When I'll be checking for ratio being a function of epoch I'll just enter it here
             augmentation_dict=self.augmentation_dict,
+            sortby_str=self.sortby_str
         )
 
+        if not self.cli_args.balanced:
+            self.target = np.hstack((np.zeros(len(self.train_ds.pos_list), dtype=np.int32),
+                                    np.ones(len(self.train_ds.neg_list), dtype=np.int32)))
+
+            self.class_sample_count = torch.tensor([len(self.train_ds.pos_list), len(self.train_ds.neg_list)])
+            self.weight = 1. / self.class_sample_count
+            self.samples_weight = np.array([self.weight[t] for t in self.target])
+
+            self.sampler = WeightedRandomSampler(self.samples_weight, len(self.samples_weight))
+
+        
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
             batch_size *= torch.cuda.device_count()
@@ -151,6 +168,7 @@ class LunaTrainingApp:
             batch_size=batch_size,
             num_workers=self.cli_args.num_workers,
             pin_memory=self.use_cuda,
+            sampler=self.sampler
         )
 
         return train_dl

@@ -9,6 +9,8 @@ from collections import namedtuple
 import SimpleITK as sitk
 import numpy as np
 
+#import random
+
 import torch
 import torch.cuda
 from torch.utils.data import Dataset
@@ -34,6 +36,8 @@ def getCandidateInfoList(requireOnDisk_bool=True):
     # We construct a set with all series_uids that are present on disk.
     # This will let us use the data, even if we haven't downloaded all of
     # the subsets yet.
+    #There is a bug in implementation, in original structure luna data is located in data
+    #not data-unversioned
     mhd_list = glob.glob('data-unversioned/part2/luna/subset*/*.mhd')
     presentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
@@ -82,10 +86,11 @@ def getCandidateInfoList(requireOnDisk_bool=True):
 
 class Ct:
     def __init__(self, series_uid):
+        #so when you enter UID it will automatically form a path from a function below
         mhd_path = glob.glob(
             'data-unversioned/part2/luna/subset*/{}.mhd'.format(series_uid)
         )[0]
-
+        #read the image with a special library and transform it into an array
         ct_mhd = sitk.ReadImage(mhd_path)
         ct_a = np.array(sitk.GetArrayFromImage(ct_mhd), dtype=np.float32)
 
@@ -103,6 +108,8 @@ class Ct:
         self.direction_a = np.array(ct_mhd.GetDirection()).reshape(3, 3)
 
     def getRawCandidate(self, center_xyz, width_irc):
+        #so having a candidate_info_list we can look up by UID a center_xyz value and
+        #use it in this function
         center_irc = xyz2irc(
             center_xyz,
             self.origin_xyz,
@@ -112,6 +119,8 @@ class Ct:
 
         slice_list = []
         for axis, center_val in enumerate(center_irc):
+            #so it will write a start index at half a distance from center 
+            #and then end index will be 1 width away from start index
             start_ndx = int(round(center_val - width_irc[axis]/2))
             end_ndx = int(start_ndx + width_irc[axis])
 
@@ -135,11 +144,13 @@ class Ct:
 
         return ct_chunk, center_irc
 
-
+#this will cache entire ct
 @functools.lru_cache(1, typed=True)
 def getCt(series_uid):
     return Ct(series_uid)
 
+#so it will cache particular Ct chunk(and the could be several of them)
+#to use em during training
 @raw_cache.memoize(typed=True)
 def getCtRawCandidate(series_uid, center_xyz, width_irc):
     ct = getCt(series_uid)
@@ -153,6 +164,7 @@ class LunaDataset(Dataset):
                  series_uid=None,
             ):
         self.candidateInfo_list = copy.copy(getCandidateInfoList())
+        #random.shuffle(self.candidateInfo_list)
 
         if series_uid:
             self.candidateInfo_list = [

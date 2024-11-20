@@ -39,7 +39,7 @@ def getCandidateInfoList(requireOnDisk_bool=True):
     presentOnDisk_set = {os.path.split(p)[-1][:-4] for p in mhd_list}
 
     diameter_dict = {}
-    with open('data/part2/luna/annotations.csv', "r") as f:
+    with open('data-unversioned/part2/luna/annotations.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
             annotationCenter_xyz = tuple([float(x) for x in row[1:4]])
@@ -50,7 +50,7 @@ def getCandidateInfoList(requireOnDisk_bool=True):
             )
 
     candidateInfo_list = []
-    with open('data/part2/luna/candidates.csv', "r") as f:
+    with open('data-unversioned/part2/luna/candidates.csv', "r") as f:
         for row in list(csv.reader(f))[1:]:
             series_uid = row[0]
 

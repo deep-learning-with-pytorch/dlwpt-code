@@ -22,6 +22,8 @@ def findPositiveSamples(start_ndx=0, limit=10):
 
     return positiveSample_list
 
+
+
 def showCandidate(series_uid, batch_ndx=None, **kwargs):
     ds = LunaDataset(series_uid=series_uid, **kwargs)
     pos_list = [i for i, x in enumerate(ds.candidateInfo_list) if x.isNodule_bool]

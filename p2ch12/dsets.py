@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.cuda
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, WeightedRandomSampler
 
 from util.disk import getCache
 from util.util import XyzTuple, xyz2irc

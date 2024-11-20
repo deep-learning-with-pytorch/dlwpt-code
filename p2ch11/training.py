@@ -2,6 +2,8 @@ import argparse
 import datetime
 import os
 import sys
+sys.path.append('../')
+sys.path.append('p2ch11/')
 
 import numpy as np
 
@@ -13,9 +15,9 @@ from torch.optim import SGD, Adam
 from torch.utils.data import DataLoader
 
 from util.util import enumerateWithEstimate
-from .dsets import LunaDataset
+from dsets import LunaDataset
 from util.logconf import logging
-from .model import LunaModel
+from model import LunaModel
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -67,17 +69,19 @@ class LunaTrainingApp:
         self.val_writer = None
         self.totalTrainingSamples_count = 0
 
-        self.use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda" if self.use_cuda else "cpu")
+        #self.use_cuda = torch.cuda.is_available()
+        #self.device = torch.device("cuda" if self.use_cuda else "cpu")
+        self.use_mps = torch.backends.mps.is_available()
+        self.device = torch.device("mps" if self.use_mps else "cpu")
 
         self.model = self.initModel()
         self.optimizer = self.initOptimizer()
 
     def initModel(self):
         model = LunaModel()
-        if self.use_cuda:
-            log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
-            if torch.cuda.device_count() > 1:
+        if self.use_mps:
+            log.info("Using MPS; {} devices.".format(torch.mps.device_count()))
+            if torch.mps.device_count() > 1:
                 model = nn.DataParallel(model)
             model = model.to(self.device)
         return model
@@ -93,14 +97,14 @@ class LunaTrainingApp:
         )
 
         batch_size = self.cli_args.batch_size
-        if self.use_cuda:
-            batch_size *= torch.cuda.device_count()
+        if self.use_mps:
+            batch_size *= torch.mps.device_count()
 
         train_dl = DataLoader(
             train_ds,
             batch_size=batch_size,
             num_workers=self.cli_args.num_workers,
-            pin_memory=self.use_cuda,
+            pin_memory=self.use_mps,
         )
 
         return train_dl
@@ -112,14 +116,14 @@ class LunaTrainingApp:
         )
 
         batch_size = self.cli_args.batch_size
-        if self.use_cuda:
-            batch_size *= torch.cuda.device_count()
+        if self.use_mps:
+            batch_size *= torch.mps.device_count()
 
         val_dl = DataLoader(
             val_ds,
             batch_size=batch_size,
             num_workers=self.cli_args.num_workers,
-            pin_memory=self.use_cuda,
+            pin_memory=self.use_mps,
         )
 
         return val_dl
@@ -148,7 +152,7 @@ class LunaTrainingApp:
                 len(train_dl),
                 len(val_dl),
                 self.cli_args.batch_size,
-                (torch.cuda.device_count() if self.use_cuda else 1),
+                (torch.mps.device_count() if self.use_mps else 1),
             ))
 
             trnMetrics_t = self.doTraining(epoch_ndx, train_dl)
